@@ -1,0 +1,23 @@
+services:
+  ide:
+    container_name: mcp-sandbox-pyrepl-ide
+    build:
+      context: ./docker_context
+      dockerfile: ./Dockerfile
+      args:
+        DOCKER_BUILDKIT: 1
+        USER_ID: 1000
+        GROUP_ID: 1000
+        BASE_IMAGE: ubuntu:26.04
+    volumes:
+      - /home/m/docker_fs/repos/mcp-sandbox-pyrepl:/home/ubuntu/repos/mcp-sandbox-pyrepl
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - /home/m/docker_fs/dots/.ssh:/home/ubuntu/.ssh
+      - /home/m/docker_fs/dots/mcp-sandbox-pyrepl/.config:/home/ubuntu/.config
+      - /home/m/docker_fs/dots/mcp-sandbox-pyrepl/.emacs.d:/home/ubuntu/.emacs.d
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - DISPLAY=:0
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OLLAMA_HOST=http://host.docker.internal:11434
