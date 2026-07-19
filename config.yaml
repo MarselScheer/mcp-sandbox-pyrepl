@@ -1,0 +1,11 @@
+sandbox:
+  images:
+    "3.9": "sandbox-base:3.9"
+    "3.10": "sandbox-base:3.10"
+    "3.11": "sandbox-base:3.11"
+    "3.12": "sandbox-base:3.12"
+    "3.13": "sandbox-base:3.13"
+  defaults:
+    python_version: "3.12"
+    timeout: 30
+  data_dir: "/home/ubuntu/repos/mcp-sandbox-pyrepl/data"

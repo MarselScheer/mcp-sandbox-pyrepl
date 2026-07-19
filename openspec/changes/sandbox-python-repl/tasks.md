@@ -1,12 +1,12 @@
 ## 1. Project Setup
 
-- [ ] 1.1 Create project structure: `src/`, `images/sandbox-base/`, `config.yaml`, `pyproject.toml`
-- [ ] 1.2 Add dependencies: `mcp`, `docker-py`, `pyyaml` to `pyproject.toml`
-- [ ] 1.3 Create `config.yaml` with image registry, default settings, and data directory path
+- [x] 1.1 Create project structure: `src/`, `images/sandbox-base/`, `config.yaml`, `pyproject.toml`
+- [x] 1.2 Add dependencies: `mcp`, `docker-py`, `pyyaml` to `pyproject.toml`
+- [x] 1.3 Create `config.yaml` with image registry, default settings, and data directory path
 
 ## 2. Base Docker Image
 
-- [ ] 2.1 Create `images/sandbox-base/Dockerfile` — Python 3.x slim base, install `uv`, create `sandbox` user (UID 1000), copy entrypoint
+- [x] 2.1 Create `images/sandbox-base/Dockerfile` — Python 3.x slim base, install `uv`, create `sandbox` user (UID 1000), copy entrypoint
 - [ ] 2.2 Create `images/sandbox-base/entrypoint.py` — JSON-RPC 2.0 loop over stdin/stdout
 
 ## 3. REPL Entrypoint (Inside Container)
