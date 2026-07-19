@@ -13,7 +13,8 @@ RUN mkdir -p /data /session && \
     chown -R sandbox:sandbox /data /session /home/sandbox
 
 # Copy the REPL entrypoint
-COPY entrypoint.py /entrypoint.py
+# Build from repo root: docker build -t sandbox-base:3.12 -f images/sandbox-base/Dockerfile .
+COPY src/entrypoint.py /entrypoint.py
 
 # Switch to non-root user
 USER sandbox
