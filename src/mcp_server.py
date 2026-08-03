@@ -173,6 +173,10 @@ class MCPToolHandler:
     ) -> dict[str, Any]:
         """Write content to a file in the session's data directory.
 
+        Delegates to SessionManager.write_file() which uses docker exec
+        to interact with the container's /data volume. This avoids host-side
+        bind mount issues (e.g., Docker-in-Docker).
+
         Args:
             session_id: Target session identifier.
             path: Relative path within the data directory.
@@ -181,31 +185,15 @@ class MCPToolHandler:
         Returns:
             Dict with success status.
         """
-        import base64
-
-        info = self._sm.get_session(session_id)
-        if info is None:
-            return {"success": False, "error": f"Session not found: {session_id}"}
-
-        data_dir = self._sm._config.data_dir / session_id
-        file_path = data_dir / path
-
-        try:
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-            # Try to decode as base64 first; if it fails, write as text
-            try:
-                decoded = base64.b64decode(content, validate=True)
-                file_path.write_bytes(decoded)
-            except (base64.binascii.Error, ValueError):
-                file_path.write_text(content)
-            return {"success": True}
-        except OSError as exc:
-            return {"success": False, "error": str(exc)}
+        return self._sm.write_file(session_id, path, content)
 
     def read_file(
         self, session_id: str, path: str
     ) -> dict[str, Any]:
         """Read a file from the session's data directory.
+
+        Delegates to SessionManager.read_file() which uses docker exec
+        to interact with the container's /data volume.
 
         Args:
             session_id: Target session identifier.
@@ -214,32 +202,15 @@ class MCPToolHandler:
         Returns:
             Dict with content (text or base64-encoded bytes).
         """
-        import base64
-
-        info = self._sm.get_session(session_id)
-        if info is None:
-            return {"error": f"Session not found: {session_id}"}
-
-        data_dir = self._sm._config.data_dir / session_id
-        file_path = data_dir / path
-
-        if not file_path.exists():
-            return {"error": f"File not found: {path}"}
-
-        try:
-            content = file_path.read_bytes()
-            # Try to return as text; fall back to base64
-            try:
-                return {"content": content.decode("utf-8")}
-            except UnicodeDecodeError:
-                return {"content": base64.b64encode(content).decode("ascii")}
-        except OSError as exc:
-            return {"error": str(exc)}
+        return self._sm.read_file(session_id, path)
 
     def list_files(
         self, session_id: str, path: str = ""
     ) -> dict[str, Any]:
         """List files in the session's data directory.
+
+        Delegates to SessionManager.list_files() which uses docker exec
+        to interact with the container's /data volume.
 
         Args:
             session_id: Target session identifier.
@@ -248,30 +219,7 @@ class MCPToolHandler:
         Returns:
             Dict with files list.
         """
-
-        info = self._sm.get_session(session_id)
-        if info is None:
-            return {"error": f"Session not found: {session_id}"}
-
-        data_dir = self._sm._config.data_dir / session_id
-        list_dir = data_dir / path if path else data_dir
-
-        if not list_dir.exists():
-            return {"files": []}
-
-        try:
-            entries = []
-            for entry in sorted(list_dir.iterdir()):
-                entries.append(
-                    {
-                        "name": entry.name,
-                        "type": "directory" if entry.is_dir() else "file",
-                        "size": entry.stat().st_size,
-                    }
-                )
-            return {"files": entries}
-        except OSError as exc:
-            return {"error": str(exc)}
+        return self._sm.list_files(session_id, path)
 
 
 # ──────────────────────────────────────────────────────────────────────

@@ -54,6 +54,7 @@ class FakeDockerClient:
         self.created_containers: list[dict[str, Any]] = []
         self.removed_containers: list[str] = []
         self.network_changes: list[dict[str, Any]] = []
+        self.rpc_calls: list[dict[str, Any]] = []
 
     def containers_create(
         self,
@@ -66,6 +67,7 @@ class FakeDockerClient:
         volumes: list[dict[str, Any]] | None = None,
         network: str | None = None,
         detach: bool = False,
+        tmpfs: dict[str, str] | None = None,
     ) -> FakeContainer:
         container_id = name or f"container-{len(self.containers) + 1}"
         container = FakeContainer(container_id=container_id, image=image)
@@ -115,6 +117,22 @@ class FakeDockerClient:
             container.exec_log.append(cmd)
         return {"exit_code": 0, "output": ""}
 
+    def container_rpc(
+        self, container_id: str, request: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Simulate sending a JSON-RPC request and receiving a response."""
+        self.rpc_calls.append({"container_id": container_id, "request": request})
+        return {
+            "jsonrpc": "2.0",
+            "id": request.get("id"),
+            "result": {
+                "stdout": "",
+                "stderr": "",
+                "display": [],
+                "error": None,
+            },
+        }
+
     def network_disconnect(
         self, container_id: str, network: str = "bridge"
     ) -> None:
@@ -144,6 +162,78 @@ class FakeDockerClient:
                 "network": network,
             }
         )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Docker-py-style client (mimics real docker-py API surface)
+# ──────────────────────────────────────────────────────────────────────
+
+
+class _DockerPyContainers:
+    """Mimics docker-py's ``containers`` namespace (ContainerCollection).
+
+    Has ``.create()`` and ``.get()`` — but the parent ``DockerPyStyleClient``
+    does NOT have a ``containers_create()`` method, reproducing exactly the
+    interface mismatch between docker-py's namespace API and the Protocol.
+    """
+
+    def __init__(self) -> None:
+        self._created: list[Any] = []
+
+    def create(
+        self,
+        image: str,
+        command: str | None = None,
+        name: str | None = None,
+        user: str | None = None,
+        read_only: bool = False,
+        cap_drop: list[str] | None = None,
+        volumes: list[dict[str, Any]] | None = None,
+        network: str | None = None,
+        detach: bool = False,
+        tmpfs: dict[str, str] | None = None,
+        stdin_open: bool = False,
+    ) -> Any:
+        from types import SimpleNamespace
+
+        container_id = name or f"container-{len(self._created) + 1}"
+        container = SimpleNamespace(id=container_id, image=image)
+        self._created.append(
+            {
+                "image": image,
+                "command": command,
+                "name": name,
+                "user": user,
+                "read_only": read_only,
+                "cap_drop": cap_drop,
+                "volumes": volumes,
+                "network": network,
+                "detach": detach,
+                "tmpfs": tmpfs,
+                "stdin_open": stdin_open,
+            }
+        )
+        return container
+
+    def get(self, container_id: str) -> Any:
+        raise ValueError(f"Container {container_id} not found")
+
+
+class DockerPyStyleClient:
+    """Mimics the real docker-py ``docker.DockerClient`` API surface.
+
+    docker-py uses a namespace pattern: ``client.containers.create(...)``
+    and ``client.containers.get(...)`` — **not** flat ``containers_create``.
+
+    This class deliberately does NOT implement the ``DockerClient`` Protocol
+    (no ``containers_create`` method), so injecting it into ``SessionManager``
+    reproduces the exact ``AttributeError`` seen in production.
+
+    This is NOT a fake for testing — it's a reproduction of the bug.
+    """
+
+    def __init__(self) -> None:
+        self.containers = _DockerPyContainers()
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -244,23 +334,55 @@ class TestSessionManagerCreate:
         create_args = docker.created_containers[0]
         assert create_args["cap_drop"] == ["ALL"]
 
-    def test_create_session_mounts_data_and_session_volumes(self) -> None:
-        docker = FakeDockerClient()
-        mgr = SessionManager(
-            docker=docker,
-            config=SessionManagerConfig(
-                data_dir=Path("/tmp/test-data"),
-            ),
-        )
+    def test_create_session_uses_named_volumes_for_data_and_session(
+        self,
+    ) -> None:
+        """Both /data and /session use empty host_path (named volumes).
 
-        session_id = mgr.create_session(python_version="3.12")
+        This avoids host-side bind mount issues when the MCP server runs
+        inside a Docker container (Docker-in-Docker). Named volumes are
+        managed entirely by Docker and never resolve paths on the host.
+        """
+        docker = FakeDockerClient()
+        mgr = SessionManager(docker=docker)
+
+        mgr.create_session(python_version="3.12")
 
         create_args = docker.created_containers[0]
         volumes = create_args["volumes"]
         assert volumes is not None
-        data_binds = [v for v in volumes if v["container_path"] == "/data"]
-        assert len(data_binds) == 1
-        assert session_id in data_binds[0]["host_path"]
+        for vol in volumes:
+            assert (
+                vol["host_path"] == ""
+            ), f"Expected named volume for {vol['container_path']}, got bind mount"
+
+    def test_create_session_does_not_access_host_filesystem(self) -> None:
+        """Regression test for Docker-in-Docker bind mount error.
+
+        The original bug: create_session called _ensure_data_dir() which
+        created a directory under data_dir (e.g., /home/ubuntu/...), then
+        bind-mounted that path into the container. When the MCP server ran
+        inside a Docker container, the Docker daemon (on the host) tried to
+        resolve the bind mount path on the host filesystem — but the path
+        only existed inside the IDE container, causing:
+        [Errno 13] Permission denied: '/home/ubuntu'
+
+        Fix: Use Docker named volumes for /data instead of host bind mounts.
+        This test verifies no host-side filesystem operations are performed
+        even when data_dir points to a home-directory path.
+        """
+        docker = FakeDockerClient()
+        # Use a home-directory-based data_dir — this would fail with bind mounts
+        mgr = SessionManager(
+            docker=docker,
+            config=SessionManagerConfig(
+                data_dir=Path("/home/ubuntu/repos/mcp-sandbox-pyrepl/data"),
+            ),
+        )
+
+        # Must not raise PermissionError or any OSError
+        session_id = mgr.create_session(python_version="3.12")
+        assert session_id.startswith("sess_")
 
     def test_create_session_adds_to_registry(self) -> None:
         docker = FakeDockerClient()
@@ -270,6 +392,37 @@ class TestSessionManagerCreate:
 
         sessions = mgr.list_sessions()
         assert session_id in sessions
+
+    def test_create_session_fails_with_dockerpy_style_client(
+        self,
+    ) -> None:
+        """Reproduce the production AttributeError.
+
+        The real docker-py client uses a namespace API
+        (``client.containers.create``), but the ``DockerClient`` Protocol
+        expects a flat method (``client.containers_create``).
+
+        When a docker-py-style object is injected directly (as happens in
+        ``main.py`` via ``docker.from_env()``), ``create_session`` raises:
+
+            AttributeError: 'DockerClient' object has no attribute
+                           'containers_create'
+
+        This test verifies the error is correctly reproduced — before
+        the fix is applied. No Docker daemon needed.
+        """
+        docker = DockerPyStyleClient()
+        mgr = SessionManager(
+            docker=docker,
+            config=SessionManagerConfig(
+                image_registry={"3.12": "sandbox-base:3.12"},
+            ),
+        )
+
+        with pytest.raises(AttributeError) as exc_info:
+            mgr.create_session(python_version="3.12")
+
+        assert "containers_create" in str(exc_info.value)
 
 
 class TestSessionManagerEnd:
@@ -387,7 +540,123 @@ class TestSessionManagerNetwork:
         assert "bridge" not in (container.attached_networks or set())
 
 
-class TestSessionManagerRestart:
+class TestSessionManagerExec:
+    """Sending code execution via JSON-RPC."""
+
+    def test_send_exec_calls_container_rpc(self) -> None:
+        """send_exec delegates to container_rpc on the Docker client."""
+        docker = FakeDockerClient()
+        mgr = SessionManager(docker=docker)
+        sid = mgr.create_session(python_version="3.12")
+        cid = _container_id(mgr, sid)
+
+        mgr.send_exec(sid, "print('hello')")
+
+        assert len(docker.rpc_calls) == 1
+        assert docker.rpc_calls[0]["container_id"] == cid
+        assert docker.rpc_calls[0]["request"]["method"] == "exec"
+        assert docker.rpc_calls[0]["request"]["params"]["code"] == "print('hello')"
+
+    def test_send_exec_returns_stdout(self) -> None:
+        """send_exec returns stdout from the container_rpc response."""
+        docker = FakeDockerClient()
+        mgr = SessionManager(docker=docker)
+        sid = mgr.create_session(python_version="3.12")
+
+        # Make container_rpc return a known response
+        original_rpc = docker.container_rpc
+
+        def patched_rpc(container_id: str, request: dict[str, Any]) -> dict[str, Any]:
+            original_rpc(container_id, request)
+            return {
+                "jsonrpc": "2.0",
+                "id": request.get("id"),
+                "result": {
+                    "stdout": "hello\n",
+                    "stderr": "",
+                    "display": [],
+                    "error": None,
+                },
+            }
+
+        docker.container_rpc = patched_rpc  # type: ignore[assignment]
+
+        result = mgr.send_exec(sid, "print('hello')")
+
+        assert result["stdout"] == "hello\n"
+
+    def test_send_exec_returns_error(self) -> None:
+        """send_exec returns error from the container_rpc response."""
+        docker = FakeDockerClient()
+        mgr = SessionManager(docker=docker)
+        sid = mgr.create_session(python_version="3.12")
+
+        original_rpc = docker.container_rpc
+
+        def patched_rpc(container_id: str, request: dict[str, Any]) -> dict[str, Any]:
+            original_rpc(container_id, request)
+            return {
+                "jsonrpc": "2.0",
+                "id": request.get("id"),
+                "result": {
+                    "stdout": "",
+                    "stderr": "Traceback...",
+                    "display": [],
+                    "error": "ZeroDivisionError: division by zero",
+                },
+            }
+
+        docker.container_rpc = patched_rpc  # type: ignore[assignment]
+
+        result = mgr.send_exec(sid, "1/0")
+
+        assert result["error"] == "ZeroDivisionError: division by zero"
+
+    def test_send_exec_returns_display(self) -> None:
+        """send_exec returns display output from the container_rpc response."""
+        docker = FakeDockerClient()
+        mgr = SessionManager(docker=docker)
+        sid = mgr.create_session(python_version="3.12")
+
+        original_rpc = docker.container_rpc
+
+        def patched_rpc(container_id: str, request: dict[str, Any]) -> dict[str, Any]:
+            original_rpc(container_id, request)
+            return {
+                "jsonrpc": "2.0",
+                "id": request.get("id"),
+                "result": {
+                    "stdout": "",
+                    "stderr": "",
+                    "display": ["42"],
+                    "error": None,
+                },
+            }
+
+        docker.container_rpc = patched_rpc  # type: ignore[assignment]
+
+        result = mgr.send_exec(sid, "42")
+
+        assert result["display"] == ["42"]
+
+    def test_send_exec_raises_on_nonexistent_session(self) -> None:
+        """send_exec raises ValueError for non-existent sessions."""
+        docker = FakeDockerClient()
+        mgr = SessionManager(docker=docker)
+
+        with pytest.raises(ValueError, match="Session not found"):
+            mgr.send_exec("nonexistent", "print('hi')")
+
+    def test_send_rpc_raises_on_nonexistent_session(self) -> None:
+        """send_rpc raises ValueError for non-existent sessions."""
+        docker = FakeDockerClient()
+        mgr = SessionManager(docker=docker)
+
+        with pytest.raises(ValueError, match="Session not found"):
+            mgr.send_rpc(
+                "nonexistent",
+                {"jsonrpc": "2.0", "id": 1, "method": "exec", "params": {}},
+            )
     """Container restart on corruption."""
 
     def test_restart_container_kills_and_recreates(self) -> None:

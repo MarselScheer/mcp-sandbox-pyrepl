@@ -40,6 +40,7 @@ class DockerClient(Protocol):
         volumes: list[dict[str, Any]] | None = ...,
         network: str | None = ...,
         detach: bool = ...,
+        tmpfs: dict[str, str] | None = ...,
     ) -> Any:
         ...
 
@@ -58,6 +59,17 @@ class DockerClient(Protocol):
     def container_exec_run(
         self, container_id: str, cmd: list[str]
     ) -> dict[str, Any]:
+        ...
+
+    def container_rpc(
+        self, container_id: str, request: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Send a JSON-RPC request to the container and read the response.
+
+        Writes the request to the entrypoint's stdin and reads the
+        response from stdout. Raises ConnectionError if no response
+        is received within a reasonable time.
+        """
         ...
 
     def network_disconnect(
@@ -83,7 +95,7 @@ class SessionManagerConfig:
     No magic numbers in the code. Everything configurable lives here.
     """
 
-    data_dir: Path = Path("/home/ubuntu/repos/mcp-sandbox-pyrepl/data")
+    data_dir: Path = field(default_factory=lambda: Path.home() / ".mcp-sandbox-pyrepl" / "data")
     image_registry: dict[str, str] = field(default_factory=lambda: {
         "3.9": "sandbox-base:3.9",
         "3.10": "sandbox-base:3.10",
@@ -152,11 +164,14 @@ class SessionManager:
             resolved_image = image
 
         session_id = self._generate_session_id()
-        data_path = self._ensure_data_dir(session_id)
 
         volumes = [
             {
-                "host_path": str(data_path),
+                # Use a named volume for /data so Docker manages storage
+                # instead of requiring a host-side bind mount. This avoids
+                # permission errors when the MCP server runs inside a
+                # Docker container (Docker-in-Docker scenario).
+                "host_path": "",
                 "container_path": "/data",
                 "mode": "rw",
             },
@@ -173,6 +188,7 @@ class SessionManager:
             read_only=True,
             cap_drop=["ALL"],
             volumes=volumes,
+            tmpfs={"/tmp": "rw,size=64m"},
             network=self._config.network_name,
             detach=True,
         )
@@ -258,10 +274,9 @@ class SessionManager:
             self._docker.container_remove(metadata.container_id, force=True)
 
         # Create a new container for the same session
-        data_path = self._ensure_data_dir(session_id)
         volumes = [
             {
-                "host_path": str(data_path),
+                "host_path": "",
                 "container_path": "/data",
                 "mode": "rw",
             },
@@ -278,6 +293,7 @@ class SessionManager:
             read_only=True,
             cap_drop=["ALL"],
             volumes=volumes,
+            tmpfs={"/tmp": "rw,size=64m"},
             network=self._config.network_name,
             detach=True,
         )
@@ -295,21 +311,17 @@ class SessionManager:
     def send_rpc(
         self, session_id: str, request: dict[str, Any]
     ) -> dict[str, Any]:
-        """Send a JSON-RPC request to the session container and read response."""
+        """Send a JSON-RPC request to the session container and read the response.
+
+        Delegates to the Docker client's container_rpc which handles the
+        stdin write + stdout read cycle through the container's entrypoint.
+        """
         metadata = self._sessions.get(session_id)
         if metadata is None:
             msg = f"Session not found: {session_id}"
             raise ValueError(msg)
 
-        stdin = self._docker.container_stdin(metadata.container_id)
-        line = json.dumps(request) + "\n"
-        stdin.write(line)
-        stdin.flush()
-
-        # Read one line of response from container stdout
-        # In the real implementation, this would read from the container's
-        # stdout stream. Simplified for the Protocol.
-        return {"jsonrpc": "2.0", "id": request.get("id"), "result": {}}
+        return self._docker.container_rpc(metadata.container_id, request)
 
     def send_exec(
         self, session_id: str, code: str, timeout: float = 30.0
@@ -321,7 +333,161 @@ class SessionManager:
             "method": "exec",
             "params": {"code": code, "timeout": timeout},
         }
-        return self.send_rpc(session_id, request)
+        response = self.send_rpc(session_id, request)
+        # Extract the result sub-dict from the JSON-RPC response envelope
+        return response.get("result", response)
+
+    # ── File operations via docker exec ────────────────────────────
+
+    def write_file(
+        self, session_id: str, path: str, content: str
+    ) -> dict[str, Any]:
+        """Write content to a file in the session's /data directory.
+
+        Uses docker exec to interact with the container's /data volume,
+        avoiding host-side bind mount issues (e.g., Docker-in-Docker).
+
+        Args:
+            session_id: Target session identifier.
+            path: Relative path within /data.
+            content: File content (text or base64-encoded bytes).
+
+        Returns:
+            Dict with success status.
+        """
+        import base64 as _b64
+
+        metadata = self._sessions.get(session_id)
+        if metadata is None:
+            return {"success": False, "error": f"Session not found: {session_id}"}
+
+        # Base64-encode the content to avoid shell escaping issues
+        encoded = _b64.b64encode(content.encode("utf-8")).decode("ascii")
+
+        script = (
+            "import base64, os\n"
+            f"data = base64.b64decode({json.dumps(encoded)})\n"
+            f"p = {json.dumps(path)}\n"
+            "full_path = os.path.join('/data', p)\n"
+            "os.makedirs(os.path.dirname(full_path), exist_ok=True)\n"
+            "with open(full_path, 'wb') as f:\n"
+            "    f.write(data)\n"
+            "print('OK')\n"
+        )
+
+        result = self._docker.container_exec_run(
+            metadata.container_id, ["python3", "-c", script]
+        )
+
+        if result.get("exit_code") != 0:
+            return {
+                "success": False,
+                "error": result.get("output", "Unknown error"),
+            }
+        return {"success": True}
+
+    def read_file(
+        self, session_id: str, path: str
+    ) -> dict[str, Any]:
+        """Read a file from the session's /data directory.
+
+        Uses docker exec to interact with the container's /data volume.
+
+        Args:
+            session_id: Target session identifier.
+            path: Relative path within /data.
+
+        Returns:
+            Dict with content (text or base64-encoded bytes).
+        """
+        import base64 as _b64
+
+        metadata = self._sessions.get(session_id)
+        if metadata is None:
+            return {"error": f"Session not found: {session_id}"}
+
+        script = (
+            "import base64, os, json as j\n"
+            f"p = {json.dumps(path)}\n"
+            "full_path = os.path.join('/data', p)\n"
+            "if not os.path.exists(full_path):\n"
+            "    print(j.dumps({'error': 'File not found'}))\n"
+            "else:\n"
+            "    with open(full_path, 'rb') as f:\n"
+            "        data = f.read()\n"
+            "    print(j.dumps({'content': base64.b64encode(data).decode('ascii')}))\n"
+        )
+
+        result = self._docker.container_exec_run(
+            metadata.container_id, ["python3", "-c", script]
+        )
+
+        if result.get("exit_code") != 0:
+            return {"error": result.get("output", "Unknown error")}
+
+        try:
+            output = result.get("output", "")
+            parsed = json.loads(output.strip())
+            if "error" in parsed:
+                return {"error": parsed["error"]}
+            encoded = parsed.get("content", "")
+            raw = _b64.b64decode(encoded)
+            try:
+                return {"content": raw.decode("utf-8")}
+            except UnicodeDecodeError:
+                return {"content": encoded}
+        except (json.JSONDecodeError, KeyError):
+            return {"error": "Failed to parse file content"}
+
+    def list_files(
+        self, session_id: str, path: str = ""
+    ) -> dict[str, Any]:
+        """List files in the session's /data directory.
+
+        Uses docker exec to interact with the container's /data volume.
+
+        Args:
+            session_id: Target session identifier.
+            path: Optional subdirectory path within /data.
+
+        Returns:
+            Dict with files list.
+        """
+        metadata = self._sessions.get(session_id)
+        if metadata is None:
+            return {"error": f"Session not found: {session_id}"}
+
+        script = (
+            "import os, json as j\n"
+            f"p = {json.dumps(path)}\n"
+            "full_path = os.path.join('/data', p) if p else '/data'\n"
+            "if not os.path.exists(full_path):\n"
+            "    print(j.dumps({'files': []}))\n"
+            "else:\n"
+            "    entries = []\n"
+            "    for name in sorted(os.listdir(full_path)):\n"
+            "        entry_path = os.path.join(full_path, name)\n"
+            "        st = os.stat(entry_path)\n"
+            "        entries.append({\n"
+            "            'name': name,\n"
+            "            'type': 'directory' if os.path.isdir(entry_path) else 'file',\n"
+            "            'size': st.st_size,\n"
+            "        })\n"
+            "    print(j.dumps({'files': entries}))\n"
+        )
+
+        result = self._docker.container_exec_run(
+            metadata.container_id, ["python3", "-c", script]
+        )
+
+        if result.get("exit_code") != 0:
+            return {"error": result.get("output", "Unknown error")}
+
+        try:
+            output = result.get("output", "")
+            return json.loads(output.strip())
+        except json.JSONDecodeError:
+            return {"error": "Failed to parse file listing"}
 
     # ── Private helpers ──────────────────────────────────────────────
 
@@ -339,11 +505,6 @@ class SessionManager:
     @staticmethod
     def _generate_session_id() -> str:
         return f"sess_{uuid.uuid4().hex[:12]}"
-
-    def _ensure_data_dir(self, session_id: str) -> Path:
-        data_path = self._config.data_dir / session_id
-        data_path.mkdir(parents=True, exist_ok=True)
-        return data_path
 
     def _send_shutdown(self, container_id: str) -> None:
         request = {

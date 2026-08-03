@@ -117,8 +117,11 @@ def _merge_config(
 def create_docker_client() -> Any:
     """Create a Docker client using the docker-py library.
 
+    Returns a ``RealDockerClient`` adapter that satisfies the
+    ``DockerClient`` Protocol expected by ``SessionManager``.
+
     Returns:
-        A docker-py DockerClient instance.
+        A ``RealDockerClient`` instance wrapping the docker-py client.
 
     Raises:
         RuntimeError: If Docker is not available.
@@ -126,11 +129,13 @@ def create_docker_client() -> Any:
     try:
         import docker  # type: ignore[import-untyped]
 
-        client = docker.from_env()
+        from docker_adapter import RealDockerClient
+
+        raw_client = docker.from_env()
         # Verify Docker is reachable
-        client.ping()
+        raw_client.ping()
         logger.info("Docker daemon is available")
-        return client
+        return RealDockerClient(raw_client)
     except Exception as exc:
         msg = (
             f"Docker is not available: {exc}. "

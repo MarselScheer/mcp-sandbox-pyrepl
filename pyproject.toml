@@ -21,7 +21,10 @@ exclude-newer = "30 days"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-v --tb=short --cov=src"
+addopts = "-v --tb=short --cov=src -m \"not integration\""
+markers = [
+    "integration: Integration tests that require a real Docker daemon.",
+]
 pythonpath = ["src"]
 
 [tool.ruff]

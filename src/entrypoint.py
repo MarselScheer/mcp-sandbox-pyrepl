@@ -293,6 +293,7 @@ class PackageInstaller:
             "uv",
             "pip",
             "install",
+            "--no-cache",
             *specs,
         ]
 

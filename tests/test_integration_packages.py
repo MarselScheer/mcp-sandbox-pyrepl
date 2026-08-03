@@ -1,0 +1,109 @@
+"""Integration tests for package installation inside sandbox containers.
+
+Tests package installation via uv pip install and package isolation
+between independent sessions.
+"""
+
+from __future__ import annotations
+
+import pytest
+from docker import DockerClient as _DockerClient
+
+from session_manager import SessionManager
+
+
+@pytest.mark.integration
+class TestPackageInstallation:
+    """Package installation inside Docker containers."""
+
+    def test_install_and_use_package(
+        self,
+        session_manager: SessionManager,
+        docker_client: _DockerClient,
+    ) -> None:
+        """Install a package and use it in subsequent code execution."""
+        session_id = session_manager.create_session(python_version="3.12")
+        info = session_manager.get_session(session_id)
+        assert info is not None
+        container_id = info["container_id"]
+
+        container = docker_client.containers.get(container_id)
+
+        # Install package via uv pip install inside the session venv.
+        # --no-cache is required because the container's rootfs is read-only
+        # and uv's default cache dir (/home/sandbox/.cache/uv) is on the
+        # read-only rootfs.
+        install_result = container.exec_run(
+            [
+                "uv", "pip", "install", "--no-cache", "pytz",
+                "--python", "/session/venv/bin/python",
+            ],
+        )
+        install_output = install_result.output.decode("utf-8") if isinstance(install_result.output, bytes) else install_result.output
+        assert install_result.exit_code == 0, f"Package install failed: {install_output}"
+
+        # Verify the package is available by importing and using it
+        verify_result = container.exec_run(
+            [
+                "python3", "-c",
+                "import pytz; tz = pytz.timezone('UTC'); print(tz.zone)",
+            ],
+            environment={"VIRTUAL_ENV": "/session/venv", "PATH": "/session/venv/bin:/usr/local/bin:/usr/bin:/bin"},
+        )
+        verify_output = verify_result.output.decode("utf-8") if isinstance(verify_result.output, bytes) else verify_result.output
+
+        assert verify_result.exit_code == 0, f"Package verification failed: {verify_output}"
+        assert "UTC" in verify_output
+
+        session_manager.end_session(session_id)
+
+    def test_package_isolation_between_sessions(
+        self,
+        session_manager: SessionManager,
+        docker_client: _DockerClient,
+    ) -> None:
+        """Package installed in session A is unavailable in session B."""
+        # Create two independent sessions
+        session_a = session_manager.create_session(python_version="3.12")
+        session_b = session_manager.create_session(python_version="3.12")
+
+        info_a = session_manager.get_session(session_a)
+        info_b = session_manager.get_session(session_b)
+        assert info_a is not None and info_b is not None
+
+        container_a = docker_client.containers.get(info_a["container_id"])
+        container_b = docker_client.containers.get(info_b["container_id"])
+
+        # Install pytz in session A only.
+        # --no-cache is required because the container's rootfs is read-only
+        # and uv's default cache dir (/home/sandbox/.cache/uv) is on the
+        # read-only rootfs.
+        install_result = container_a.exec_run(
+            [
+                "uv", "pip", "install", "--no-cache", "pytz",
+                "--python", "/session/venv/bin/python",
+            ],
+        )
+        install_output = install_result.output.decode("utf-8") if isinstance(install_result.output, bytes) else install_result.output
+        assert install_result.exit_code == 0, f"Package install failed: {install_output}"
+
+        # Verify pytz is available in session A
+        check_a = container_a.exec_run(
+            ["python3", "-c", "import pytz; print(pytz.__version__)"],
+            environment={"VIRTUAL_ENV": "/session/venv", "PATH": "/session/venv/bin:/usr/local/bin:/usr/bin:/bin"},
+        )
+        output_a = check_a.output.decode("utf-8") if isinstance(check_a.output, bytes) else check_a.output
+        assert check_a.exit_code == 0, f"Package should be available in session A: {output_a}"
+
+        # Verify pytz is NOT available in session B
+        check_b = container_b.exec_run(
+            ["python3", "-c", "import pytz"],
+            environment={"VIRTUAL_ENV": "/session/venv", "PATH": "/session/venv/bin:/usr/local/bin:/usr/bin:/bin"},
+        )
+        output_b = check_b.output.decode("utf-8") if isinstance(check_b.output, bytes) else check_b.output
+        assert check_b.exit_code != 0, f"Package should NOT be available in session B: {output_b}"
+        assert "ModuleNotFoundError" in output_b or "ImportError" in output_b
+
+        # Cleanup
+        session_manager.end_session(session_a)
+        session_manager.end_session(session_b)

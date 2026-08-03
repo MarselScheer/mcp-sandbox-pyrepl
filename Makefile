@@ -1,10 +1,13 @@
-.PHONY: install test lint format format-check typecheck check clean
+.PHONY: install test test-integration lint format format-check typecheck check clean
 
 install:
 	uv sync --group dev
 
 test:
 	uv run pytest -v --tb=short --cov=src tests/
+
+test-integration:
+	uv run pytest -v --tb=short -m integration tests/
 
 lint:
 	uv run ruff check src/ tests/
