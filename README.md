@@ -17,37 +17,37 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     MCP Client (AI Assistant)                │
+│                     MCP Client (AI Assistant)               │
 └─────────────────────────┬───────────────────────────────────┘
                           │ MCP Protocol (stdio/SSE)
                           ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                  MCP Server (FastMCP)                        │
+│                  MCP Server (FastMCP)                       │
 │  ┌──────────────────────────────────────────────────────┐   │
-│  │              MCPToolHandler                           │   │
+│  │              MCPToolHandler                          │   │
 │  │  create_session  execute_python  install_packages    │   │
 │  │  list_sessions   get_session     end_session         │   │
 │  │  list_python_versions  write_file  read_file  list_files│ │
 │  └──────────────────────┬───────────────────────────────┘   │
-│                         │ DI (Protocol)                      │
+│                         │ DI (Protocol)                     │
 │  ┌──────────────────────▼───────────────────────────────┐   │
-│  │              SessionManager                           │   │
+│  │              SessionManager                          │   │
 │  │  Container lifecycle, network mgmt, session registry │   │
 │  └──────────────────────┬───────────────────────────────┘   │
-│                         │ DockerClient (Protocol)            │
+│                         │ DockerClient (Protocol)           │
 └─────────────────────────┼───────────────────────────────────┘
                           │
                           ▼
 ┌─────────────────────────────────────────────────────────────┐
-│             Docker Container (per session)                   │
+│             Docker Container (per session)                  │
 │  ┌──────────────────────────────────────────────────────┐   │
 │  │  SessionServer (JSON-RPC 2.0 stdin/stdout loop)      │   │
 │  │  ┌────────────────────────────────────────────────┐  │   │
 │  │  │  RPCDispatcher                                 │  │   │
-│  │  │  ┌──────────┐  ┌─────────────────┐  ┌───────┐ │  │   │
-│  │  │  │ Namespace│  │ ThreadTimeout   │  │Package│ │  │   │
-│  │  │  │ (state)  │  │ Strategy        │  │Installer│ │   │
-│  │  │  └──────────┘  └─────────────────┘  └───────┘ │  │   │
+│  │  │  ┌──────────┐  ┌─────────────────┐  ┌───────┐  │  │   │
+│  │  │  │ Namespace│  │ ThreadTimeout   │  │Package│  │  │   │
+│  │  │  │ (state)  │  │ Strategy        │  │Installer │  │   │
+│  │  │  └──────────┘  └─────────────────┘  └───────┘  │  │   │
 │  │  └────────────────────────────────────────────────┘  │   │
 │  └──────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
@@ -218,7 +218,3 @@ All tests follow behavior-driven, outside-in TDD:
 - **No `mock.patch`** — dependencies are injected via Protocols. Tests use fakes (e.g., `FakeSessionManager`, `FakeDockerClient`).
 - **1–3 line arrange phase** — if the setup is longer, the design needs refactoring.
 - **Behavior, not implementation** — tests specify what the code does, not how it does it.
-
-## License
-
-MIT
