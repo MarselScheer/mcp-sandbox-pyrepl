@@ -12,6 +12,12 @@ from docker import DockerClient as _DockerClient
 from session_manager import SessionManager
 
 
+def _decode_output(result: object) -> str:
+    """Decode exec_run output to string if needed."""
+    output: bytes | str = result.output  # type: ignore[union-attr]
+    return output.decode("utf-8") if isinstance(output, bytes) else output
+
+
 @pytest.mark.integration
 class TestSecurityConstraints:
     """Security constraints on Docker containers."""
@@ -30,10 +36,12 @@ class TestSecurityConstraints:
         result = docker_client.containers.get(container_id).exec_run(
             ["python3", "-c", "import os; print(os.getuid())"]
         )
-        output = result.output.decode("utf-8") if isinstance(result.output, bytes) else result.output
+        output = _decode_output(result)
 
         assert result.exit_code == 0, f"Failed to get UID: {output}"
-        assert "1000" in output, f"Expected UID 1000, got: {output.strip()}"
+        assert "1000" in output, (
+            f"Expected UID 1000, got: {output.strip()}"
+        )
 
         session_manager.end_session(session_id)
 
@@ -42,21 +50,28 @@ class TestSecurityConstraints:
         session_manager: SessionManager,
         docker_client: _DockerClient,
     ) -> None:
-        """Writing outside /data/ (e.g., /home/sandbox/test.txt) fails with permission error."""
+        """Writing outside /data/ fails with permission error."""
         session_id = session_manager.create_session(python_version="3.12")
         info = session_manager.get_session(session_id)
         assert info is not None
         container_id = info["container_id"]
 
         result = docker_client.containers.get(container_id).exec_run(
-            ["python3", "-c", "open('/home/sandbox/test.txt', 'w').write('should fail')"]
+            [
+                "python3", "-c",
+                "open('/home/sandbox/test.txt', 'w').write('should fail')",
+            ]
         )
-        output = result.output.decode("utf-8") if isinstance(result.output, bytes) else result.output
+        output = _decode_output(result)
 
         # Should fail because container has read-only rootfs.
-        # /tmp is writable (tmpfs mount), but /home/sandbox is on the read-only rootfs.
+        # /tmp is writable (tmpfs mount), but /home/sandbox is on the
+        # read-only rootfs.
         assert result.exit_code != 0
-        assert "read-only" in output.lower() or "permission" in output.lower() or "error" in output.lower() or "denied" in output.lower()
+        error_keywords = [
+            "read-only", "permission", "error", "denied",
+        ]
+        assert any(kw in output.lower() for kw in error_keywords)
 
         session_manager.end_session(session_id)
 
@@ -72,11 +87,16 @@ class TestSecurityConstraints:
         container_id = info["container_id"]
 
         result = docker_client.containers.get(container_id).exec_run(
-            ["python3", "-c", "open('/data/test.txt', 'w').write('should succeed'); print('ok')"]
+            [
+                "python3", "-c",
+                "open('/data/test.txt', 'w').write('should succeed'); print('ok')",
+            ]
         )
-        output = result.output.decode("utf-8") if isinstance(result.output, bytes) else result.output
+        output = _decode_output(result)
 
-        assert result.exit_code == 0, f"Writing to /data/ failed: {output}"
+        assert result.exit_code == 0, (
+            f"Writing to /data/ failed: {output}"
+        )
         assert "ok" in output
 
         session_manager.end_session(session_id)
@@ -102,7 +122,7 @@ class TestSecurityConstraints:
                 "urllib.request.urlopen('http://example.com', timeout=5)",
             ]
         )
-        output = result.output.decode("utf-8") if isinstance(result.output, bytes) else result.output
+        output = _decode_output(result)
 
         # Should fail with a network error
         assert result.exit_code != 0
@@ -127,7 +147,7 @@ class TestSecurityConstraints:
         session_manager: SessionManager,
         docker_client: _DockerClient,
     ) -> None:
-        """Two independent sessions have separate containers; ending one doesn't affect the other."""
+        """Separate containers; ending one doesn't affect the other."""
         # Create two sessions
         sid_a = session_manager.create_session(python_version="3.12")
         sid_b = session_manager.create_session(python_version="3.12")

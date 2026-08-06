@@ -6,6 +6,7 @@ Exercises create, list, get, and end operations against real Docker.
 
 from __future__ import annotations
 
+import docker
 import pytest
 from docker import DockerClient as _DockerClient
 
@@ -23,7 +24,7 @@ class TestSessionCreate:
     def test_create_session_returns_session_id(
         self, session_manager: SessionManager
     ) -> None:
-        """Create a session with default Python version, verify it returns a session ID."""
+        """Create a session and verify it returns a session ID."""
         session_id = session_manager.create_session(python_version="3.12")
 
         assert session_id.startswith("sess_")
@@ -161,7 +162,9 @@ class TestSessionEnd:
         session_manager.end_session(session_id)
 
         # Verify the container is removed
-        with pytest.raises(Exception):
+        # `docker.containers.get()` raises `docker.errors.NotFound`
+        # when the container has been removed.
+        with pytest.raises(docker.errors.NotFound):
             container = docker_client.containers.get(container_id)
             # If the container exists but is stopped, that's also acceptable
             # in some Docker versions; check it's not running

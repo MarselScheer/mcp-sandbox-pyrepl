@@ -20,6 +20,13 @@ from docker import DockerClient as _DockerClient
 from session_manager import SessionManager
 from tests.rpc_helpers import rpc_call
 
+
+def _decode_output(result: object) -> str:
+    """Decode exec_run output to string if needed."""
+    output: bytes | str = result.output  # type: ignore[union-attr]
+    return output.decode("utf-8") if isinstance(output, bytes) else output
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Tests
 # ──────────────────────────────────────────────────────────────────────
@@ -43,7 +50,7 @@ class TestCodeExecution:
         result = docker_client.containers.get(container_id).exec_run(
             ["python3", "-c", "print('hello from docker')"]
         )
-        output = result.output.decode("utf-8") if isinstance(result.output, bytes) else result.output
+        output = _decode_output(result)
 
         assert result.exit_code == 0
         assert "hello from docker" in output
@@ -64,7 +71,7 @@ class TestCodeExecution:
         result = docker_client.containers.get(container_id).exec_run(
             ["python3", "-c", "if True print('missing colon')"]
         )
-        output = result.output.decode("utf-8") if isinstance(result.output, bytes) else result.output
+        output = _decode_output(result)
 
         assert result.exit_code != 0
         assert "SyntaxError" in output
@@ -85,7 +92,7 @@ class TestCodeExecution:
         result = docker_client.containers.get(container_id).exec_run(
             ["python3", "-c", "1/0"]
         )
-        output = result.output.decode("utf-8") if isinstance(result.output, bytes) else result.output
+        output = _decode_output(result)
 
         assert result.exit_code != 0
         assert "ZeroDivisionError" in output
@@ -113,7 +120,7 @@ class TestCodeExecution:
         read_result = docker_client.containers.get(container_id).exec_run(
             ["python3", "-c", "print(open('/data/state.txt').read())"]
         )
-        output = read_result.output.decode("utf-8") if isinstance(read_result.output, bytes) else read_result.output
+        output = _decode_output(read_result)
 
         assert read_result.exit_code == 0
         assert "42" in output
@@ -137,7 +144,7 @@ class TestCodeExecution:
         )
         elapsed = time.time() - start
 
-        output = result.output.decode("utf-8") if isinstance(result.output, bytes) else result.output
+        output = _decode_output(result)
 
         # The command should be killed/timed out within ~15 seconds
         assert elapsed < 30

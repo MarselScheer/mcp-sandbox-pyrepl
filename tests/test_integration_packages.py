@@ -12,6 +12,12 @@ from docker import DockerClient as _DockerClient
 from session_manager import SessionManager
 
 
+def _decode_output(result: object) -> str:
+    """Decode exec_run output to string if needed."""
+    output: bytes | str = result.output  # type: ignore[union-attr]
+    return output.decode("utf-8") if isinstance(output, bytes) else output
+
+
 @pytest.mark.integration
 class TestPackageInstallation:
     """Package installation inside Docker containers."""
@@ -39,20 +45,28 @@ class TestPackageInstallation:
                 "--python", "/session/venv/bin/python",
             ],
         )
-        install_output = install_result.output.decode("utf-8") if isinstance(install_result.output, bytes) else install_result.output
-        assert install_result.exit_code == 0, f"Package install failed: {install_output}"
+        install_output = _decode_output(install_result)
+        assert install_result.exit_code == 0, (
+            f"Package install failed: {install_output}"
+        )
 
         # Verify the package is available by importing and using it
+        venv_env = {
+            "VIRTUAL_ENV": "/session/venv",
+            "PATH": "/session/venv/bin:/usr/local/bin:/usr/bin:/bin",
+        }
         verify_result = container.exec_run(
             [
                 "python3", "-c",
                 "import pytz; tz = pytz.timezone('UTC'); print(tz.zone)",
             ],
-            environment={"VIRTUAL_ENV": "/session/venv", "PATH": "/session/venv/bin:/usr/local/bin:/usr/bin:/bin"},
+            environment=venv_env,
         )
-        verify_output = verify_result.output.decode("utf-8") if isinstance(verify_result.output, bytes) else verify_result.output
+        verify_output = _decode_output(verify_result)
 
-        assert verify_result.exit_code == 0, f"Package verification failed: {verify_output}"
+        assert verify_result.exit_code == 0, (
+            f"Package verification failed: {verify_output}"
+        )
         assert "UTC" in verify_output
 
         session_manager.end_session(session_id)
@@ -84,24 +98,34 @@ class TestPackageInstallation:
                 "--python", "/session/venv/bin/python",
             ],
         )
-        install_output = install_result.output.decode("utf-8") if isinstance(install_result.output, bytes) else install_result.output
-        assert install_result.exit_code == 0, f"Package install failed: {install_output}"
+        install_output = _decode_output(install_result)
+        assert install_result.exit_code == 0, (
+            f"Package install failed: {install_output}"
+        )
 
         # Verify pytz is available in session A
+        venv_env = {
+            "VIRTUAL_ENV": "/session/venv",
+            "PATH": "/session/venv/bin:/usr/local/bin:/usr/bin:/bin",
+        }
         check_a = container_a.exec_run(
             ["python3", "-c", "import pytz; print(pytz.__version__)"],
-            environment={"VIRTUAL_ENV": "/session/venv", "PATH": "/session/venv/bin:/usr/local/bin:/usr/bin:/bin"},
+            environment=venv_env,
         )
-        output_a = check_a.output.decode("utf-8") if isinstance(check_a.output, bytes) else check_a.output
-        assert check_a.exit_code == 0, f"Package should be available in session A: {output_a}"
+        output_a = _decode_output(check_a)
+        assert check_a.exit_code == 0, (
+            f"Package should be available in session A: {output_a}"
+        )
 
         # Verify pytz is NOT available in session B
         check_b = container_b.exec_run(
             ["python3", "-c", "import pytz"],
-            environment={"VIRTUAL_ENV": "/session/venv", "PATH": "/session/venv/bin:/usr/local/bin:/usr/bin:/bin"},
+            environment=venv_env,
         )
-        output_b = check_b.output.decode("utf-8") if isinstance(check_b.output, bytes) else check_b.output
-        assert check_b.exit_code != 0, f"Package should NOT be available in session B: {output_b}"
+        output_b = _decode_output(check_b)
+        assert check_b.exit_code != 0, (
+            f"Package should NOT be available in session B: {output_b}"
+        )
         assert "ModuleNotFoundError" in output_b or "ImportError" in output_b
 
         # Cleanup

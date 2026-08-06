@@ -50,6 +50,6 @@
 
 ## 8. Validation
 
-- [ ] 8.1 Run `pytest -m integration -v --tb=short` and verify all integration tests pass (or skip gracefully if Docker unavailable)
-- [ ] 8.2 Run `pytest -v --tb=short` and verify existing unit tests still pass (integration tests excluded by default marker)
-- [ ] 8.3 Run `make test-integration` and verify the Makefile target works
+- [x] 8.1 Run `pytest -m integration -v --tb=short` and verify all integration tests pass (or skip gracefully if Docker unavailable)
+- [x] 8.2 Run `pytest -v --tb=short` and verify existing unit tests still pass (integration tests excluded by default marker)
+- [x] 8.3 Run `make test-integration` and verify the Makefile target works

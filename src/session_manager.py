@@ -95,7 +95,9 @@ class SessionManagerConfig:
     No magic numbers in the code. Everything configurable lives here.
     """
 
-    data_dir: Path = field(default_factory=lambda: Path.home() / ".mcp-sandbox-pyrepl" / "data")
+    data_dir: Path = field(
+        default_factory=lambda: Path.home() / ".mcp-sandbox-pyrepl" / "data"
+    )
     image_registry: dict[str, str] = field(default_factory=lambda: {
         "3.9": "sandbox-base:3.9",
         "3.10": "sandbox-base:3.10",
@@ -470,7 +472,8 @@ class SessionManager:
             "        st = os.stat(entry_path)\n"
             "        entries.append({\n"
             "            'name': name,\n"
-            "            'type': 'directory' if os.path.isdir(entry_path) else 'file',\n"
+            "            'type': 'directory' "
+            "if os.path.isdir(entry_path) else 'file',\n"
             "            'size': st.st_size,\n"
             "        })\n"
             "    print(j.dumps({'files': entries}))\n"
