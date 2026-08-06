@@ -158,10 +158,29 @@ class RealDockerClient:
     ) -> dict[str, Any]:
         """Send a JSON-RPC request to the container's entrypoint and read the response.
 
-        Uses docker exec to write the request to the entrypoint's stdin
-        (/proc/1/fd/0 — PID 1 is the entrypoint), then reads the response
-        from container logs. The entrypoint writes JSON-RPC responses to
-        stdout, which Docker captures and makes available via logs().
+        The entrypoint (PID 1) runs a JSON-RPC server that reads from stdin
+        and writes responses to stdout.  This method sends one request and
+        reads the response via that path.
+
+        Why not use ``container_stdin()`` (attach_socket) for both sides?
+        -----------------------------------------------------------------
+        ``attach_socket`` gives you a raw bidirectional stream to the
+        container's stdin/stdout/stderr, but Docker multiplexes stdout and
+        stderr over that stream using an 8-byte frame header per chunk
+        (stream type + length).  Parsing that correctly to separate
+        application-level responses from stray output is fragile and
+        over-engineered for a request-response pattern.
+
+        Instead, this method decouples the write and read sides:
+
+          Write side — docker exec writes to ``/proc/1/fd/0`` (PID 1's
+          stdin).  This is equivalent to typing into the entrypoint's stdin.
+          Linux allows any process in the same PID namespace to write to
+          another process's file descriptors, so a docker exec subprocess
+          can inject the request directly.
+
+          Read side — ``container.logs()`` returns the entrypoint's stdout
+          cleanly, already demuxed by Docker.  No frame parsing needed.
 
         This exercises the real JSON-RPC stdin/stdout path through the
         entrypoint, not a docker exec subprocess.
@@ -172,6 +191,9 @@ class RealDockerClient:
         container = self._client.containers.get(container_id)
         request_json = json.dumps(request)
 
+        # Write the request to PID 1's stdin via a docker exec subprocess.
+        # /proc/1/fd/0 is the entrypoint process's stdin pipe. Writing to it
+        # is equivalent to writing to the container's attached stdin.
         write_script = (
             "import os\n"
             f"req = {json.dumps(request_json)}\n"
@@ -182,7 +204,9 @@ class RealDockerClient:
         )
         container.exec_run(["python3", "-c", write_script])
 
-        # Give the entrypoint a moment to process and flush the response
+        # TODO: sleep-based polling is a race condition. Replace with a
+        #       synchronization mechanism (e.g. a ready file + inotify, or
+        #       switching to the attach_socket path with proper frame parsing).
         time.sleep(0.3)
 
         logs = container.logs(stdout=True, stderr=False, tail=5).decode(
