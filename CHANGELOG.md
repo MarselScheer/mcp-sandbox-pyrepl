@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] — 2026-08-06
+
+### Added
+
+- **Real Docker Client Adapter** (`RealDockerClient`) — Wraps the docker-py SDK to satisfy the `DockerClient` Protocol, enabling production use of real Docker containers:
+  - Container lifecycle: create, start, get, stop, remove
+  - JSON-RPC communication via docker exec to `/proc/1/fd/0` (entrypoint's stdin)
+  - Network connect/disconnect for package installation isolation
+  - Volume creation with auto-generated named volumes
+  - `container_rpc()` for bidirectional stdin/stdout communication with the entrypoint
+
+- **Integration Test Suite** — 5 test files (180+ tests) exercising the full Docker stack:
+  - `test_integration_session.py` — Session lifecycle: create, list, get, end, restart, cross-session isolation, cleanup on stale sessions
+  - `test_integration_execution.py` — Code execution: stdout capture, syntax/runtime errors, state persistence, timeout enforcement, display hook capture, namespace reset via real JSON-RPC
+  - `test_integration_files.py` — File I/O: write/read text and binary files, directory operations, error handling via docker exec into `/data` named volumes
+  - `test_integration_packages.py` — Package installation: `uv pip install`, import and use installed packages, cross-session isolation
+  - `test_integration_security.py` — Security constraints: non-root user (UID 1000), read-only root filesystem, network isolation, session filesystem separation
+  - `tests/conftest.py` — Session-scoped fixtures for Docker client, image building, and per-test session management
+  - `tests/rpc_helpers.py` — `rpc_call()` helper for JSON-RPC communication in tests
+
+- **Docker named volumes for `/data`** — Session `/data` directories now use Docker-managed named volumes instead of host-side bind mounts, avoiding permission errors in Docker-in-Docker scenarios
+
+- **`/tmp` tmpfs mount** — Session containers get a 64MB tmpfs at `/tmp` for temporary file operations
+
+- **`test-integration` Makefile target** — Runs integration tests with `-m integration` marker
+
+### Changed
+
+- **File I/O delegation** — `MCPToolHandler.write_file()`, `read_file()`, and `list_files()` now delegate to `SessionManager` methods that use docker exec to interact with container `/data` volumes, instead of doing host-side filesystem I/O
+
+- **`SessionManager.send_rpc()`** — Now delegates to `RealDockerClient.container_rpc()` which writes requests to the entrypoint's stdin via docker exec and reads responses from container logs (demuxed stdout)
+
+- **Default data directory** — Changed from project-local `data/` to `~/.mcp-sandbox-pyrepl/data/`
+
+- **`create_docker_client()`** — Now wraps the docker-py client in `RealDockerClient` adapter before returning
+
+- **Package installer** — Added `--no-cache` flag to `uv pip install` to reduce image size
+
+- **Pytest configuration** — Integration tests excluded by default (`-m "not integration"`), with explicit `integration` marker
+
+- **README** — Removed MIT license section, minor formatting corrections in architecture diagram
+
 ## [0.1.0] — 2026-07-19
 
 ### Added
