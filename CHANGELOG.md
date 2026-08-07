@@ -1,0 +1,125 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.2.0] — 2026-08-06
+
+### Added
+
+- **Real Docker Client Adapter** (`RealDockerClient`) — Wraps the docker-py SDK to satisfy the `DockerClient` Protocol, enabling production use of real Docker containers:
+  - Container lifecycle: create, start, get, stop, remove
+  - JSON-RPC communication via docker exec to `/proc/1/fd/0` (entrypoint's stdin)
+  - Network connect/disconnect for package installation isolation
+  - Volume creation with auto-generated named volumes
+  - `container_rpc()` for bidirectional stdin/stdout communication with the entrypoint
+
+- **Integration Test Suite** — 5 test files (180+ tests) exercising the full Docker stack:
+  - `test_integration_session.py` — Session lifecycle: create, list, get, end, restart, cross-session isolation, cleanup on stale sessions
+  - `test_integration_execution.py` — Code execution: stdout capture, syntax/runtime errors, state persistence, timeout enforcement, display hook capture, namespace reset via real JSON-RPC
+  - `test_integration_files.py` — File I/O: write/read text and binary files, directory operations, error handling via docker exec into `/data` named volumes
+  - `test_integration_packages.py` — Package installation: `uv pip install`, import and use installed packages, cross-session isolation
+  - `test_integration_security.py` — Security constraints: non-root user (UID 1000), read-only root filesystem, network isolation, session filesystem separation
+  - `tests/conftest.py` — Session-scoped fixtures for Docker client, image building, and per-test session management
+  - `tests/rpc_helpers.py` — `rpc_call()` helper for JSON-RPC communication in tests
+
+- **Docker named volumes for `/data`** — Session `/data` directories now use Docker-managed named volumes instead of host-side bind mounts, avoiding permission errors in Docker-in-Docker scenarios
+
+- **`/tmp` tmpfs mount** — Session containers get a 64MB tmpfs at `/tmp` for temporary file operations
+
+- **`test-integration` Makefile target** — Runs integration tests with `-m integration` marker
+
+### Changed
+
+- **File I/O delegation** — `MCPToolHandler.write_file()`, `read_file()`, and `list_files()` now delegate to `SessionManager` methods that use docker exec to interact with container `/data` volumes, instead of doing host-side filesystem I/O
+
+- **`SessionManager.send_rpc()`** — Now delegates to `RealDockerClient.container_rpc()` which writes requests to the entrypoint's stdin via docker exec and reads responses from container logs (demuxed stdout)
+
+- **Default data directory** — Changed from project-local `data/` to `~/.mcp-sandbox-pyrepl/data/`
+
+- **`create_docker_client()`** — Now wraps the docker-py client in `RealDockerClient` adapter before returning
+
+- **Package installer** — Added `--no-cache` flag to `uv pip install` to reduce image size
+
+- **Pytest configuration** — Integration tests excluded by default (`-m "not integration"`), with explicit `integration` marker
+
+- **README** — Removed MIT license section, minor formatting corrections in architecture diagram
+
+## [0.1.0] — 2026-07-19
+
+### Added
+
+- **MCP Server** — FastMCP-based server exposing 10 MCP tools for sandboxed REPL management:
+  - `create_session` — Create sandboxed REPL sessions with configurable Python version or custom Docker image
+  - `execute_python` — Execute Python code with captured stdout, stderr, display hook output, and error reporting
+  - `install_packages` — Install Python packages via `uv pip install` with temporary network access
+  - `list_sessions` / `get_session` — List and inspect active sessions
+  - `end_session` — Cleanly terminate sessions (idempotent)
+  - `list_python_versions` — List available Python versions and custom images
+  - `write_file` / `read_file` / `list_files` — File I/O operations on session data volumes
+
+- **Session Manager** — Docker container lifecycle management:
+  - Create sessions with non-root user (UID 1000), read-only root filesystem, and all capabilities dropped
+  - Session-scoped `/data` and `/session` volume mounts
+  - Network connect/disconnect for secure package installation
+  - Session restart on hard timeout corruption
+  - Configurable image registry mapping Python versions to Docker images
+  - Graceful shutdown via JSON-RPC before container stop
+
+- **Container-side JSON-RPC Server** — stdin/stdout loop running inside each Docker container:
+  - `Namespace` — Persistent execution state across `exec` calls with REPL display hook capture
+  - `ThreadTimeoutStrategy` — Thread-based timeout enforcement with ctypes async exception fallback
+  - `NoOpTimeoutStrategy` — Pass-through strategy for testing
+  - `PackageInstaller` — Package installation via `uv pip install` into session-scoped virtual environment
+  - Support for `exec`, `install`, `reset`, `ping`, and `shutdown` RPC methods
+
+- **Configuration System** — YAML-based configuration with defaults:
+  - Image registry for Python 3.9 through 3.13
+  - Configurable default Python version and execution timeout
+  - Custom data directory path
+  - Command-line argument support (`--config`, `--verbose`)
+  - Graceful fallback to defaults on missing or invalid config files
+
+- **Docker Base Image** — `sandbox-base` Dockerfile:
+  - Python 3.x slim base with `uv` pre-installed
+  - Non-root `sandbox` user (UID 1000)
+  - REPL entrypoint script baked in
+  - Pre-configured virtual environment at `/session/venv`
+  - Build-time Python version parameterization
+
+- **File I/O** — Host-side file operations on session data directories:
+  - Write text and binary (base64-encoded) files
+  - Read files with automatic text/binary detection
+  - List directory contents with file type and size
+
+- **Architecture & Design**:
+  - Dependency Injection via `typing.Protocol` (no `mock.patch` in tests)
+  - Factory pattern for composition root (config read once, baked into objects)
+  - Rich domain models (`SessionMetadata`, `Namespace`, `RPCRequest`, `ExecResult`)
+  - Strategy pattern for timeout enforcement
+  - Outside-in TDD with behavior-driven tests
+
+- **Test Suite** — 70+ behavior-driven tests organized by component:
+  - `FakeDockerClient` and `FakeSessionManager` for host-side testing
+  - `FakeTimeoutStrategy` and `FakePackageInstaller` for dispatcher testing
+  - Namespace tests covering expressions, print output, state persistence, syntax/runtime errors, multi-line code, imports, and reset
+  - Timeout tests covering normal completion, timeout errors, state preservation after timeout
+  - Server loop tests covering multi-request processing, shutdown, empty lines, invalid JSON
+  - MCP tool tests covering all 10 tools with edge cases
+  - Config loading tests with file fallback and merge semantics
+  - Signal handler registration tests
+
+- **Development Toolchain**:
+  - `uv` for fast dependency management
+  - `ruff` for linting and formatting
+  - `pytest` with coverage reporting
+  - `ty` for static type checking
+  - `Makefile` with `install`, `test`, `lint`, `format`, `format-check`, `typecheck`, `check`, `clean` targets
+  - Smoke tests verifying the toolchain is correctly installed
+
+- **Documentation**:
+  - Design principles document outlining testability-first philosophy
+  - OpenSpec specifications for session lifecycle, code execution, sandbox security, data transfer, package management, and image management
+  - Docker Compose setup for IDE-based development
