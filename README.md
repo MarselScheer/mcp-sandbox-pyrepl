@@ -1,5 +1,9 @@
 # mcp-sandbox-pyrepl
 
+> **⚠️ Warning: Learning Project**
+>
+> This is a **learning project** created to get familiar with [OpenSpec](https://openspec.dev). It is not intended for production use and **will not be actively maintained**. Use at your own risk.
+
 **An MCP server providing a sandboxed, stateful Python REPL via Docker containers.**
 
 `mcp-sandbox-pyrepl` exposes a set of MCP (Model Context Protocol) tools that let AI assistants create isolated Python REPL sessions, execute code with timeouts, install packages, read/write files, and manage the full session lifecycle — all backed by Docker containers with a defense-in-depth security profile.
