@@ -528,7 +528,64 @@ class OrderRepository:
 
 ---
 
-## 9. When to Inject vs Relax
+## 9. Named Arguments at Call Sites
+
+Use keyword arguments whenever the meaning of a positional argument isn't immediately obvious. The call site is a contract with the reader — make it self-documenting.
+
+```python
+# ❌ BAD — what do these values mean?
+result = calculate(42, "active", True, None)
+
+# ✅ GOOD — self-documenting call site
+result = calculate(
+    user_id=42,
+    status="active",
+    include_inactive=True,
+    callback=None,
+)
+```
+
+### When positional is fine
+
+Positional arguments are acceptable — even preferred — when the argument is the obvious, singular subject of the function and the reader can infer meaning without looking up the signature:
+
+```python
+# ✅ GOOD — obvious, single primary subject
+total = sum(items)
+result = sqrt(16)
+order.total()
+json.loads(raw_string)
+datetime.fromisoformat("2024-01-01")
+```
+
+### When keyword is required
+
+Use keyword arguments for anything that is **not** the obvious single subject:
+
+```python
+# ❌ BAD — ambiguous positional args
+client.connect("localhost", 8080, 30, True)
+
+# ✅ GOOD — explicit intent
+client.connect(
+    host="localhost",
+    port=8080,
+    timeout=30,
+    use_ssl=True,
+)
+```
+
+This applies especially to boolean flags, numeric values, `None`, strings whose purpose isn't obvious, and injected dependencies.
+
+### The heuristic
+
+> If you had to look at the function's signature to understand a positional argument, use a keyword argument instead.
+
+If `foo(42, "bar", True)` makes you pause, the call site should be `foo(timeout=42, name="bar", retry=True)`. If it's obvious at a glance (`sqrt(16)`), positional is fine.
+
+---
+
+## 10. When to Inject vs Relax
 
 Not everything needs to be injected. The boundary is whether the dependency is **business logic** (inject it, define a Protocol) or **infrastructure/observability** (use it directly).
 
@@ -588,7 +645,7 @@ When encountering a dependency not listed above, ask:
 
 ---
 
-## 10. Implied Anti-Patterns
+## 11. Implied Anti-Patterns
 
 These don't need their own sections because the principles above kill them naturally. They're listed here so they're explicitly named.
 

@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] — 2026-08-08
+
+### Added
+
+- **`ripgrep` in IDE Docker image** — Added `ripgrep` package to `docker-ide/Dockerfile` for fast codebase search
+- **`/opsx-verify` command** — New OpenSpec command (`opsx-verify`) that verifies implementation matches change artifacts (specs, tasks, design) before archiving
+- **`openspec-verify-change` skill** — New skill for verifying that implementation is complete, correct, and coherent before archiving, with support for OpenSpec store integration
+- **"Named Arguments at Call Sites" design principle** — New section 9 in `.eca/rules/design-principles.md` providing guidance on when to use keyword vs positional arguments, including heuristics, examples of good/bad patterns, and rules for booleans, numeric values, and injected dependencies
+
+### Upgraded
+
+- **OpenSpec 1.4.1 → 1.8.0** — Upgraded the OpenSpec CLI (`@fission-ai/openspec`) and all associated commands and skills (`opsx-*`, `openspec-*`) in `.eca/` to version 1.8.0, including new `opsx-update` and `openspec-update-change` commands
+
 ## [0.2.0] — 2026-08-06
 
 ### Added
