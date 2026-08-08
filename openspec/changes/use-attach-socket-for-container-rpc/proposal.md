@@ -4,12 +4,17 @@
 
 ## What Changes
 
-Replace the two-path `exec→/proc/1/fd/0` + `container.logs()` approach in `RealDockerClient.container_rpc()` with a single, bidirectional Docker `attach_socket` connection. This gives us:
+Replace the two-path `exec→/proc/1/fd/0` + `container.logs()` approach in `RealDockerClient.container_rpc()` with a hybrid approach that keeps the proven write path but replaces the fragile read path:
 
-- **Reliable request-response pairing**: `readline()` blocks until the response arrives — no race condition, no sleep
+- **Write** (request → container stdin): Keep `docker exec sh -c echo '...' > /proc/1/fd/0` — proven reliable via shell redirection (the Python `open()` approach failed, but shell `echo` with `>` works)
+- **Read** (stdout → response): Replace `container.logs()` with a stdout-only `attach_socket` + `_DockerFrameReader` that blocks until the response arrives — no race condition, no sleep
+
+This gives us:
+
+- **Reliable request-response pairing**: The socket `read()` blocks until the response arrives — no race condition, no sleep
 - **Clean separation**: User code stdout is captured by the entrypoint's `StringIO` redirect and returned inside the JSON response — the attach socket stream only carries the JSON-RPC response
-- **No `/proc` manipulation**: Eliminates the kernel-dependent `docker exec` hack
 - **No log-parsing heuristic**: Drops the fragile "last JSON line" parsing from `container.logs()`
+- **Minimal `/proc` manipulation**: The `/proc/1/fd/0` write path uses shell redirection (via `sh -c echo`), not a separate `open()` call in a Python subprocess — simpler and more reliable
 
 The entrypoint (`entrypoint.py`) remains completely unchanged — it still reads from stdin and writes to stdout.
 

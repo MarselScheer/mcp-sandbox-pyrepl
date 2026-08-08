@@ -15,7 +15,7 @@ The current approach has a `time.sleep(0.3)` race condition (documented TODO) an
 
 **Goals:**
 - Reliable request-response pairing — no race condition, no sleep
-- Replace `docker exec` → `/proc/1/fd/0` writing with Docker's standard `attach_socket` API
+- Keep `docker exec` → `/proc/1/fd/0` for writing (proven reliable via shell `echo`), but replace `container.logs()` reading with direct attach socket reads — eliminating the `time.sleep(0.3)` race condition
 - Replace `container.logs()` parsing with direct socket reads
 - Keep `entrypoint.py` unchanged (still reads from stdin, writes to stdout)
 - Clean error propagation back through SessionManager → MCP handler
@@ -28,23 +28,33 @@ The current approach has a `time.sleep(0.3)` race condition (documented TODO) an
 
 ## Decisions
 
-### Decision 1: Two attach sockets (stdin + stdout separate) instead of one combined socket
+### Decision 1: Hybrid approach — exec for writing, attach socket for reading
 
-**Chosen: Two sockets.**
+**Chosen: Hybrid approach.**
 
-One socket for stdin (write-only, already exists as `container_stdin()`), one for stdout (read-only, new). The stdout socket uses `params={stdout: 1, stream: 1}`.
+The `container_rpc()` method uses two different mechanisms:
+1. **Write**: `docker exec sh -c echo '...' > /proc/1/fd/0` to write the JSON-RPC request to the entrypoint's stdin.
+2. **Read**: `attach_socket(params={stdout: 1, stream: 1})` to read Docker-multiplexed frames (8-byte headers) from the container's stdout, decoded by `_DockerFrameReader`.
 
-**⚠ Updated understanding (spike verified):** Docker multiplexes even with `stdout: 1` alone. Each frame has an 8-byte header (stream type [1] + pad [3] + payload length [4]). The stdout stream type is `1`. A `_DockerFrameReader` helper strips headers and returns only the stdout payload.
+**Why a combined attach socket (stdin + stdout) proved unworkable (implementation finding):**
+
+A combined `attach_socket(params={stdin: 1, stdout: 1, stream: 1})` returns a `socket.SocketIO`. While the underlying raw socket (via `_sock`) can be extracted for writing, data written to it **does not reach the container's stdin** in this Docker setup. Confirmed by spike: even a simple Python echo process (`python3 -u -c "for line in sys.stdin: print(line)"`) failed to receive data written via the combined attach socket's raw socket.
+
+**Why exec `echo > /proc/1/fd/0` works (spike verified):**
+
+The old approach of writing via `docker exec` → `open('/proc/1/fd/0', 'w')` using a Python one-liner fails with `OSError: [Errno 22] Invalid argument` (confirmed by the initial spike). However, using **shell** redirection via `docker exec sh -c echo '...' > /proc/1/fd/0` works reliably. The shell's `echo` built-in opens the PID 1 stdin file descriptor via the shell's own `/proc` access, not via an `open()` call in a separate Python process, which avoids the OSError.
+
+**⚠ Multiplexing (spike verified):** Docker multiplexes stdout even on a stdout-only attach socket. Each frame has an 8-byte header (stream type [1] + pad [3] + payload length [4]). The stdout stream type is `1`. A `_DockerFrameReader` helper strips headers and returns only the stdout payload.
 
 **Alternatives considered:**
 
-| Approach | Read side | Pros | Cons |
-|---|---|---|---|
-| **Two sockets** (stdin + stdout) | 8-byte frame headers | Simple `readline()` on payload, strip-frame reader | Two attach calls + frame parsing |
-| **One socket** (stdin + stdout) | Multiplexed with 8-byte headers | Single connection | Need frame parser for all streams, significantly more complex |
-| **Current approach** (exec + logs) | Logs demuxed by Docker | Works (mostly) | Race condition + fragile heuristic |
+| Approach | Read side | Write side | Pros | Cons |
+|---|---|---|---|---|
+| **Hybrid** (exec write + socket read) | `_DockerFrameReader` on stdout `SocketIO` — blocks until response arrives | `exec sh -c echo > /proc/1/fd/0` — proven reliable | No race condition; no log-parsing heuristics; stdin writes actually work | Still uses `/proc` file system for writing |
+| **Combined socket** (stdin + stdout) | `_DockerFrameReader` on combined `SocketIO` | `makefile("wb")` on raw socket | Single connection, conceptually clean | **Broken**: data written doesn't reach container's stdin |
+| **Old approach** (exec + logs) | Logs demuxed by Docker, parsed with heuristic | `/proc/1/fd/0` via exec | Works (mostly) | Race condition + fragile log-parsing heuristic |
 
-**Rationale:** Two sockets still wins — the frame parsing is a simple 8-byte header strip per frame, which is straightforward. A single combined socket would need to interleave stdin/stdout writes/reads in a multiplexed stream, which is significantly harder. The overhead of two `attach_socket` calls per request is negligible.
+**Rationale:** The combined socket approach was the original design goal, but spike testing proved that writing to stdin via the attach socket doesn't deliver data to the container in this Docker setup. The hybrid approach achieves the same reliability goal (no race condition, no `time.sleep`) while keeping the proven write mechanism. The `/proc` dependency is retained only for the write path, which is less invasive than the original exec+logs approach's `/proc` + sleep combined fragility.
 
 ### Decision 2: Per-request socket lifecycle
 
@@ -73,9 +83,10 @@ If a timeout occurs, we fall back to checking `container.logs()` as a last resor
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
 | `attach_socket` with `stdout:1` alone still adds 8-byte headers | **HIGH (confirmed by spike)** | Read side must strip 8-byte frame headers | Use `_DockerFrameReader` helper that reads header, extracts payload length, and returns only stdout payload bytes. |
+| `exec sh -c echo ... > /proc/1/fd/0` might fail (shell unavailable, `/proc` restricted, container terminated) | Medium | Request not delivered; response never arrives | Container-level timeout on socket read catches this; fallback to `container.logs()` as safety net |
 | Socket close can race with container shutdown | Medium | ConnectionError propagated to consumer | `_send_shutdown` uses its own `attach_socket` call (stdin-only), which is unaffected. If the container dies mid-RPC, `readline()` returns empty string (EOF) → clean ConnectionError. |
 | Entrypoint stdout has multiple frames (split across multiple TCP segments) | Low for small JSON responses, possible for large responses | Read might get partial JSON | Buffer all stdout frames until we have a complete JSON object. The `_DockerFrameReader` concatenates all payloads from stdout frames. |
-| Performance: two `attach_socket` calls per RPC adds latency | Low (HTTP attach handshake is ~1ms locally) | Not noticeable for code execution (100ms+) | Acceptable. If profiling ever shows this as a bottleneck, switch to keep-alive sockets. |
+| Performance: `container.exec_run` call per RPC adds overhead | Low (exec handshake is ~10ms locally) | Not noticeable for code execution (100ms+) | Acceptable. The attach socket read eliminates the dominant cost (the sleep) and the log-parsing heuristic. |
 
 ## Spike Findings
 
@@ -92,12 +103,10 @@ The spike script confirmed:
 
 **Action:** Implement `_DockerFrameReader` that reads the 8-byte header, extracts the payload length, reads exactly that many bytes, and returns only the stdout payload. Skip non-stdout frames (e.g., stderr = stream type 2).
 
-### Task 1.1b: `exec_run` write to `/proc/1/fd/0`
+### Task 1.1b: `exec_run` write to `/proc/1/fd/0` — revised finding
 
-**Finding: Fails with `OSError: [Errno 22] Invalid argument`.**
+**Earlier finding (incorrect):** Writing via `docker exec` → Python `open('/proc/1/fd/0', 'w')` fails with `OSError: [Errno 22] Invalid argument`. This was the original spike result.
 
-The old approach of writing via `docker exec` → `/proc/1/fd/0` fails in this environment. Likely causes:
-- Container's read-only rootfs preventing `open('/proc/1/fd/0', 'w')` from working
-- Kernel-level restrictions on writing to another process's file descriptors
+**Revised finding (corrected by follow-up spike):** Writing via the Python `open()` approach fails, but writing via **shell redirection** — `docker exec sh -c echo '...' > /proc/1/fd/0` — works reliably. The shell's `echo` built-in opens PID 1's stdin file descriptor via the shell's own `/proc` access path, which avoids the OSError seen with a separate Python `open()` call.
 
-**Action:** Use `container_stdin()` (attach_socket with `params={stdin: 1, stream: 1}`) for writing, which is the standard Docker API for this. This was already planned — the spike just confirms the old path is also broken.
+**Action:** Use `docker exec sh -c echo '...' > /proc/1/fd/0` for writing the request to stdin (proven working), and use a stdout-only `attach_socket` for reading the response. The combined attach socket approach (stdin+stdout) was abandoned because writing to stdin via the attach socket doesn't deliver data to the container.
