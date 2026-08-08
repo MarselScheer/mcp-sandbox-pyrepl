@@ -9,6 +9,7 @@ ARG GROUP_ID=
 RUN apt-get update -yqq \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     git \
+    make \
     ssh \
     curl \
     ripgrep \
