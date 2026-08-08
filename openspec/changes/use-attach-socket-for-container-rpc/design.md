@@ -32,18 +32,19 @@ The current approach has a `time.sleep(0.3)` race condition (documented TODO) an
 
 **Chosen: Two sockets.**
 
-One socket for stdin (write-only, already exists as `container_stdin()`), one for stdout (read-only, new). The stdout socket uses `params={stdout: 1, stream: 1}` — a single stream, so Docker does NOT apply the 8-byte multiplexing header.
+One socket for stdin (write-only, already exists as `container_stdin()`), one for stdout (read-only, new). The stdout socket uses `params={stdout: 1, stream: 1}`.
+
+**⚠ Updated understanding (spike verified):** Docker multiplexes even with `stdout: 1` alone. Each frame has an 8-byte header (stream type [1] + pad [3] + payload length [4]). The stdout stream type is `1`. A `_DockerFrameReader` helper strips headers and returns only the stdout payload.
 
 **Alternatives considered:**
 
 | Approach | Read side | Pros | Cons |
 |---|---|---|---|
-| **Two sockets** (stdin + stdout) | Raw, no headers | Simple `readline()`, no frame parsing | Two attach calls |
-| **One socket** (stdin + stdout) | Multiplexed with 8-byte headers | Single connection | Need frame parser for 8-byte headers, significantly more complex |
-| **One socket** (stdin + stdout, stderr excluded) | Unknown — Docker may still multiplex | Could be simpler | Unpredictable behavior, need to test |
+| **Two sockets** (stdin + stdout) | 8-byte frame headers | Simple `readline()` on payload, strip-frame reader | Two attach calls + frame parsing |
+| **One socket** (stdin + stdout) | Multiplexed with 8-byte headers | Single connection | Need frame parser for all streams, significantly more complex |
 | **Current approach** (exec + logs) | Logs demuxed by Docker | Works (mostly) | Race condition + fragile heuristic |
 
-**Rationale:** Two sockets is the simplest approach that eliminates the race condition and log-parsing. The overhead of two `attach_socket` calls per request is negligible. The stdin socket already exists (`container_stdin()`) and can be reused or a new one created per call.
+**Rationale:** Two sockets still wins — the frame parsing is a simple 8-byte header strip per frame, which is straightforward. A single combined socket would need to interleave stdin/stdout writes/reads in a multiplexed stream, which is significantly harder. The overhead of two `attach_socket` calls per request is negligible.
 
 ### Decision 2: Per-request socket lifecycle
 
@@ -71,7 +72,32 @@ If a timeout occurs, we fall back to checking `container.logs()` as a last resor
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| `attach_socket` with `stdout:1` alone still adds 8-byte headers | Low (Docker only multiplexes when both stdout+stderr are attached) | Read side would get garbage bytes | Verify in first task with a spike test. If headers are present, switch to a frame-stripping reader. |
+| `attach_socket` with `stdout:1` alone still adds 8-byte headers | **HIGH (confirmed by spike)** | Read side must strip 8-byte frame headers | Use `_DockerFrameReader` helper that reads header, extracts payload length, and returns only stdout payload bytes. |
 | Socket close can race with container shutdown | Medium | ConnectionError propagated to consumer | `_send_shutdown` uses its own `attach_socket` call (stdin-only), which is unaffected. If the container dies mid-RPC, `readline()` returns empty string (EOF) → clean ConnectionError. |
-| Entrypoint stdout has multiple lines (e.g., Python startup banner) | Low (entrypoint uses `python -c` or `python /entrypoint.py` with no banner) | First read might get non-JSON line | Use a `readline()` loop: skip non-JSON lines, return the first valid JSON object. The entrypoint only writes one JSON line per request, so this handles any bootstrap output. |
+| Entrypoint stdout has multiple frames (split across multiple TCP segments) | Low for small JSON responses, possible for large responses | Read might get partial JSON | Buffer all stdout frames until we have a complete JSON object. The `_DockerFrameReader` concatenates all payloads from stdout frames. |
 | Performance: two `attach_socket` calls per RPC adds latency | Low (HTTP attach handshake is ~1ms locally) | Not noticeable for code execution (100ms+) | Acceptable. If profiling ever shows this as a bottleneck, switch to keep-alive sockets. |
+
+## Spike Findings
+
+### Task 1.1: `attach_socket(params={stdout: 1, stream: 1})` — header verification
+
+**Finding: 8-byte frame headers ARE present even with stdout only.**
+
+The spike script confirmed:
+- Output: `\x01\x00\x00\x00\x00\x00\x004{"jsonrp`
+- Byte 0 (`\x01`): stream type = 1 (stdout)
+- Bytes 1–3: padding (zeros)
+- Bytes 4–7 (`\x00\x00\x004` = 52): payload length
+- After header: JSON payload begins
+
+**Action:** Implement `_DockerFrameReader` that reads the 8-byte header, extracts the payload length, reads exactly that many bytes, and returns only the stdout payload. Skip non-stdout frames (e.g., stderr = stream type 2).
+
+### Task 1.1b: `exec_run` write to `/proc/1/fd/0`
+
+**Finding: Fails with `OSError: [Errno 22] Invalid argument`.**
+
+The old approach of writing via `docker exec` → `/proc/1/fd/0` fails in this environment. Likely causes:
+- Container's read-only rootfs preventing `open('/proc/1/fd/0', 'w')` from working
+- Kernel-level restrictions on writing to another process's file descriptors
+
+**Action:** Use `container_stdin()` (attach_socket with `params={stdin: 1, stream: 1}`) for writing, which is the standard Docker API for this. This was already planned — the spike just confirms the old path is also broken.
