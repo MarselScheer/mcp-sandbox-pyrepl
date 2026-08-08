@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-08-08
+
+### Changed
+
+- **`RealDockerClient.container_rpc()` socket-based read** — Replaced the fragile `container.logs()` read path (with `time.sleep(0.3)` race condition and JSON-parsing heuristic) with a stdout-only `attach_socket(params={stdout: 1, stream: 1})` read via `_DockerFrameReader`, enabling reliable request-response pairing without sleeps or log parsing
+- **Write path uses shell redirection** — Changed `container_rpc()` write path from Python `open('/proc/1/fd/0', 'w')` (fails with `OSError`) to `docker exec sh -c echo '...' > /proc/1/fd/0` (shell `echo` built-in with redirection), proven reliable by spike testing
+
+### Added
+
+- **`_DockerFrameReader` helper** — Internal class in `src/docker_adapter.py` that reads 8-byte Docker multiplexed frame headers (stream type + payload length) from attach sockets, strips them, and returns only stdout payload bytes
+- **Socket timeout with `container.logs()` fallback** — `container_rpc()` uses `socket.settimeout()` with a generous timeout; on timeout, falls back to `container.logs()` as a safety net before raising `ConnectionError`
+
 ## [0.2.1] — 2026-08-08
 
 ### Added
