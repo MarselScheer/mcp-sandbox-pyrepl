@@ -17,6 +17,58 @@ from docker import DockerClient as _DockerClient
 from docker.models.containers import Container
 
 
+class _DockerFrameReader:
+    """Reads Docker-multiplexed frames, stripping 8-byte frame headers.
+
+    Docker's ``attach_socket`` with ``params={stdout: 1, stream: 1}``
+    still multiplexes output into frames with an 8-byte header:
+      byte 0:    stream type (1=stdout, 2=stderr)
+      bytes 1-3: padding (zeros)
+      bytes 4-7: payload length (big-endian uint32)
+
+    This reader strips those headers and returns only stdout payloads.
+    """
+
+    def __init__(self, raw: socket.SocketIO | socket.socket) -> None:
+        self._raw = raw
+
+    def read(self, timeout: float = 30.0) -> bytes:
+        """Read all stdout frames until timeout or EOF.
+
+        Sets a timeout on the underlying socket, then reads frames until
+        no more data arrives within the timeout window.
+        """
+        # Set timeout on the underlying socket.
+        # _sock is a private attribute of SocketIO; getattr falls back
+        # if the caller passed a plain socket instead.
+        raw = getattr(self._raw, '_sock', self._raw)
+        if isinstance(raw, socket.socket):
+            raw.settimeout(timeout)
+
+        chunks: list[bytes] = []
+        try:
+            while True:
+                header = self._raw.read(8)
+                if not header or len(header) < 8:
+                    break  # EOF
+                stream_type = header[0]
+                payload_len = int.from_bytes(header[4:8], "big")
+                if payload_len == 0:
+                    continue
+                payload = self._raw.read(payload_len)
+                if stream_type == 1:  # stdout
+                    chunks.append(payload)
+                # stderr (stream type 2) is discarded
+        except TimeoutError:
+            pass  # No more data — return what we have
+
+        return b"".join(chunks)
+
+    def close(self) -> None:
+        """Close the underlying socket."""
+        self._raw.close()
+
+
 class RealDockerClient:
     """Adapter that wraps the docker-py SDK to satisfy the DockerClient Protocol.
 
@@ -151,61 +203,59 @@ class RealDockerClient:
     ) -> dict[str, Any]:
         """Send a JSON-RPC request to the container's entrypoint and read the response.
 
-        The entrypoint (PID 1) runs a JSON-RPC server that reads from stdin
-        and writes responses to stdout.  This method sends one request and
-        reads the response via that path.
+        Uses a hybrid approach based on spike findings (see design.md):
+        - **Write**: ``docker exec sh -c echo '...' > /proc/1/fd/0`` — proven
+          reliable via shell redirection (Python ``open()`` fails with OSError,
+          but ``sh -c echo`` avoids it)
+        - **Read**: stdout-only ``attach_socket`` with ``_DockerFrameReader`` —
+          blocks until the response arrives, no race condition, no ``time.sleep``
 
-        Why not use ``container_stdin()`` (attach_socket) for both sides?
-        -----------------------------------------------------------------
-        ``attach_socket`` gives you a raw bidirectional stream to the
-        container's stdin/stdout/stderr, but Docker multiplexes stdout and
-        stderr over that stream using an 8-byte frame header per chunk
-        (stream type + length).  Parsing that correctly to separate
-        application-level responses from stray output is fragile and
-        over-engineered for a request-response pattern.
-
-        Instead, this method decouples the write and read sides:
-
-          Write side — docker exec writes to ``/proc/1/fd/0`` (PID 1's
-          stdin).  This is equivalent to typing into the entrypoint's stdin.
-          Linux allows any process in the same PID namespace to write to
-          another process's file descriptors, so a docker exec subprocess
-          can inject the request directly.
-
-          Read side — ``container.logs()`` returns the entrypoint's stdout
-          cleanly, already demuxed by Docker.  No frame parsing needed.
-
-        This exercises the real JSON-RPC stdin/stdout path through the
-        entrypoint, not a docker exec subprocess.
+        This replaces the earlier combined attach-socket approach (stdin+stdout),
+        which was abandoned because writing to stdin via the attach socket does
+        not deliver data to the container in this Docker setup.
         """
         container = self._client.containers.get(container_id)
         request_json = json.dumps(request)
 
-        # Write the request to PID 1's stdin via a docker exec subprocess.
-        # /proc/1/fd/0 is the entrypoint process's stdin pipe. Writing to it
-        # is equivalent to writing to the container's attached stdin.
-        write_script = (
-            "import os\n"
-            f"req = {json.dumps(request_json)}\n"
-            "with open('/proc/1/fd/0', 'w') as f:\n"
-            "    f.write(req + '\\n')\n"
-            "    f.flush()\n"
-            "    os.fsync(f.fileno())\n"
+        # Open a stdout-only attach socket and wrap it in a frame reader.
+        # Docker multiplexes even stdout-only output with 8-byte frame headers.
+        sock = container.attach_socket(
+            params={"stdout": 1, "stream": 1}
         )
-        container.exec_run(["python3", "-c", write_script])
+        reader = _DockerFrameReader(sock)
 
-        # TODO: sleep-based polling is a race condition. Replace with a
-        #       synchronization mechanism (e.g. a ready file + inotify, or
-        #       switching to the attach_socket path with proper frame parsing).
-        import time
+        # Write the request to PID 1's stdin via docker exec with shell
+        # redirection.  The shell's echo built-in opens /proc/1/fd/0 via the
+        # shell's own /proc access, which avoids the OSError seen with a
+        # separate Python open() call.
+        safe_json = request_json.replace("'", "'\\\'\'")
+        self.container_exec_run(
+            container_id,
+            ["sh", "-c", f"echo '{safe_json}' > /proc/1/fd/0"],
+        )
 
-        time.sleep(0.3)
+        # Read the response from stdout with a generous timeout.
+        # The response should arrive immediately after the entrypoint processes
+        # the request — no sleep or polling needed.
+        payload = reader.read(timeout=30.0)
+        reader.close()
 
-        # Read the response from container logs.
-        # The entrypoint writes JSON-RPC responses to stdout, which Docker
-        # captures and returns via logs(). We look for the last JSON line.
-        logs = container.logs(stdout=True, stderr=False, tail=5).decode("utf-8")
+        # Parse the first valid JSON object from the payload
+        for line in payload.decode("utf-8").split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                continue
 
+        # Fallback: check container logs as a safety net.
+        # The entrypoint might have written the response but the socket didn't
+        # deliver it in time (edge case under extreme load).
+        logs = container.logs(stdout=True, stderr=True, tail=10).decode(
+            "utf-8"
+        )
         for line in reversed(logs.strip().split("\n")):
             line = line.strip()
             if not line:
@@ -215,5 +265,5 @@ class RealDockerClient:
             except json.JSONDecodeError:
                 continue
 
-        msg = f"No JSON-RPC response found in container logs: {logs}"
+        msg = f"No JSON-RPC response found in attach socket or container logs: {logs}"
         raise ConnectionError(msg)
