@@ -21,7 +21,7 @@
 
 ## 5. Integration tests — Verify end-to-end with real Docker
 
-- [ ] 5.1 Run `test_entrypoint_server.py` tests to confirm the entrypoint still works correctly with stdin/stdout
-- [ ] 5.2 Run `test_integration_execution.py` tests to confirm code execution works end-to-end with the new `container_rpc()`
-- [ ] 5.3 Run `test_integration_session.py` tests to confirm session lifecycle (create/shutdown) still works
-- [ ] 5.4 Run the full test suite: `python -m pytest tests/ -v` and confirm no regressions
+- [x] 5.1 Run `test_entrypoint_server.py` tests to confirm the entrypoint still works correctly with stdin/stdout
+- [x] 5.2 Run `test_integration_execution.py` tests to confirm code execution works end-to-end with the new `container_rpc()`
+- [x] 5.3 Run `test_integration_session.py` tests to confirm session lifecycle (create/shutdown) still works
+- [x] 5.4 Run the full test suite: `python -m pytest tests/ -v` and confirm no regressions
