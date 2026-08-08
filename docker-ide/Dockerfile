@@ -11,13 +11,14 @@ RUN apt-get update -yqq \
     git \
     ssh \
     curl \
+    ripgrep \
     emacs \
     npm \
     zip \
     fonts-symbola \
     fonts-noto-color-emoji
 
-RUN npm install -g @fission-ai/openspec@1.4.1
+RUN npm install -g @fission-ai/openspec@1.8.0
 
 USER ubuntu
 WORKDIR /home/ubuntu
