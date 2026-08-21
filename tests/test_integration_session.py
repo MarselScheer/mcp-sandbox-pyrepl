@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import docker
 import pytest
-from docker import DockerClient as _DockerClient
 
 from session_manager import SessionManager
 
@@ -34,7 +33,6 @@ class TestSessionCreate:
     def test_create_session_starts_container(
         self,
         session_manager: SessionManager,
-        docker_client: _DockerClient,
     ) -> None:
         """Create a session and verify the container is actually running."""
         session_id = session_manager.create_session(python_version="3.12")
@@ -43,6 +41,7 @@ class TestSessionCreate:
         container_id = info["container_id"]
 
         # Verify the container is running via Docker SDK
+        docker_client = docker.from_env()
         container = docker_client.containers.get(container_id)
         assert container.status == "running"
 
@@ -53,13 +52,12 @@ class TestSessionCreate:
     def test_create_session_with_custom_image(
         self,
         session_manager: SessionManager,
-        sandbox_image: str,
     ) -> None:
         """Create a session with a custom image reference."""
-        session_id = session_manager.create_session(image=sandbox_image)
+        session_id = session_manager.create_session(image="sandbox-base:3.12")
         info = session_manager.get_session(session_id)
         assert info is not None
-        assert info["image"] == sandbox_image
+        assert info["image"] == "sandbox-base:3.12"
 
         # Cleanup
         session_manager.end_session(session_id)
@@ -151,7 +149,6 @@ class TestSessionEnd:
     def test_end_session_stops_container(
         self,
         session_manager: SessionManager,
-        docker_client: _DockerClient,
     ) -> None:
         """End a session and verify the container is stopped and removed."""
         session_id = session_manager.create_session(python_version="3.12")
@@ -164,6 +161,7 @@ class TestSessionEnd:
         # Verify the container is removed
         # `docker.containers.get()` raises `docker.errors.NotFound`
         # when the container has been removed.
+        docker_client = docker.from_env()
         with pytest.raises(docker.errors.NotFound):
             container = docker_client.containers.get(container_id)
             # If the container exists but is stopped, that's also acceptable

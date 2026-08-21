@@ -1,4 +1,4 @@
-.PHONY: install test test-integration lint format format-check typecheck check clean
+.PHONY: install test test-integration lint format format-check typecheck check clean build-image
 
 install:
 	uv sync --group dev
@@ -25,3 +25,10 @@ check: lint typecheck test
 
 clean:
 	rm -rf __pycache__/ .ruff_cache/ .mypy_cache/ .pytest_cache/ htmlcov/ .coverage
+
+build-image:
+	uv run docker build \
+		-t sandbox-base:3.12 \
+		-f images/sandbox-base/Dockerfile \
+		--build-arg PYTHON_VERSION=3.12 \
+		.

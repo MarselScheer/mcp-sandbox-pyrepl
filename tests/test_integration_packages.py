@@ -6,8 +6,8 @@ between independent sessions.
 
 from __future__ import annotations
 
+import docker
 import pytest
-from docker import DockerClient as _DockerClient
 
 from session_manager import SessionManager
 
@@ -25,13 +25,13 @@ class TestPackageInstallation:
     def test_install_and_use_package(
         self,
         session_manager: SessionManager,
-        docker_client: _DockerClient,
     ) -> None:
         """Install a package and use it in subsequent code execution."""
         session_id = session_manager.create_session(python_version="3.12")
         info = session_manager.get_session(session_id)
         assert info is not None
         container_id = info["container_id"]
+        docker_client = docker.from_env()
 
         container = docker_client.containers.get(container_id)
 
@@ -74,7 +74,6 @@ class TestPackageInstallation:
     def test_package_isolation_between_sessions(
         self,
         session_manager: SessionManager,
-        docker_client: _DockerClient,
     ) -> None:
         """Package installed in session A is unavailable in session B."""
         # Create two independent sessions
@@ -84,6 +83,7 @@ class TestPackageInstallation:
         info_a = session_manager.get_session(session_a)
         info_b = session_manager.get_session(session_b)
         assert info_a is not None and info_b is not None
+        docker_client = docker.from_env()
 
         container_a = docker_client.containers.get(info_a["container_id"])
         container_b = docker_client.containers.get(info_b["container_id"])

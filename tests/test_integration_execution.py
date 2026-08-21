@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import time
 
+import docker
 import pytest
-from docker import DockerClient as _DockerClient
 
 from session_manager import SessionManager
 from tests.rpc_helpers import rpc_call
@@ -39,13 +39,13 @@ class TestCodeExecution:
     def test_execute_code_captures_stdout(
         self,
         session_manager: SessionManager,
-        docker_client: _DockerClient,
     ) -> None:
         """Execute code that prints to stdout and verify the output."""
         session_id = session_manager.create_session(python_version="3.12")
         info = session_manager.get_session(session_id)
         assert info is not None
         container_id = info["container_id"]
+        docker_client = docker.from_env()
 
         result = docker_client.containers.get(container_id).exec_run(
             ["python3", "-c", "print('hello from docker')"]
@@ -60,13 +60,13 @@ class TestCodeExecution:
     def test_syntax_error_reported(
         self,
         session_manager: SessionManager,
-        docker_client: _DockerClient,
     ) -> None:
         """Syntax errors are properly reported."""
         session_id = session_manager.create_session(python_version="3.12")
         info = session_manager.get_session(session_id)
         assert info is not None
         container_id = info["container_id"]
+        docker_client = docker.from_env()
 
         result = docker_client.containers.get(container_id).exec_run(
             ["python3", "-c", "if True print('missing colon')"]
@@ -81,13 +81,13 @@ class TestCodeExecution:
     def test_runtime_error_reported(
         self,
         session_manager: SessionManager,
-        docker_client: _DockerClient,
     ) -> None:
         """Runtime errors are properly reported with traceback."""
         session_id = session_manager.create_session(python_version="3.12")
         info = session_manager.get_session(session_id)
         assert info is not None
         container_id = info["container_id"]
+        docker_client = docker.from_env()
 
         result = docker_client.containers.get(container_id).exec_run(
             ["python3", "-c", "1/0"]
@@ -102,13 +102,13 @@ class TestCodeExecution:
     def test_state_persistence_via_data_volume(
         self,
         session_manager: SessionManager,
-        docker_client: _DockerClient,
     ) -> None:
         """State persists across executions via the data volume."""
         session_id = session_manager.create_session(python_version="3.12")
         info = session_manager.get_session(session_id)
         assert info is not None
         container_id = info["container_id"]
+        docker_client = docker.from_env()
 
         # Write state to /data/state.txt
         write_result = docker_client.containers.get(container_id).exec_run(
@@ -130,13 +130,13 @@ class TestCodeExecution:
     def test_execution_timeout_enforced(
         self,
         session_manager: SessionManager,
-        docker_client: _DockerClient,
     ) -> None:
         """Executions that exceed the timeout are terminated."""
         session_id = session_manager.create_session(python_version="3.12")
         info = session_manager.get_session(session_id)
         assert info is not None
         container_id = info["container_id"]
+        docker_client = docker.from_env()
 
         start = time.time()
         result = docker_client.containers.get(container_id).exec_run(
@@ -156,7 +156,6 @@ class TestCodeExecution:
     def test_display_hook_captures_expression_value(
         self,
         session_manager: SessionManager,
-        docker_client: _DockerClient,
     ) -> None:
         """Expression that produces a value triggers sys.displayhook capture.
 
@@ -169,6 +168,7 @@ class TestCodeExecution:
         info = session_manager.get_session(session_id)
         assert info is not None
         container_id = info["container_id"]
+        docker_client = docker.from_env()
 
         # Send JSON-RPC exec request through the entrypoint stdin/stdout path
         response = rpc_call(
@@ -193,13 +193,13 @@ class TestCodeExecution:
     def test_display_hook_captures_literal_value(
         self,
         session_manager: SessionManager,
-        docker_client: _DockerClient,
     ) -> None:
         """Literal expressions like `42` produce display hook output."""
         session_id = session_manager.create_session(python_version="3.12")
         info = session_manager.get_session(session_id)
         assert info is not None
         container_id = info["container_id"]
+        docker_client = docker.from_env()
 
         response = rpc_call(
             docker_client,
@@ -222,7 +222,6 @@ class TestCodeExecution:
     def test_namespace_reset_clears_session_state(
         self,
         session_manager: SessionManager,
-        docker_client: _DockerClient,
     ) -> None:
         """Namespace reset clears all session state.
 
@@ -233,6 +232,7 @@ class TestCodeExecution:
         info = session_manager.get_session(session_id)
         assert info is not None
         container_id = info["container_id"]
+        docker_client = docker.from_env()
 
         # Step 1: Set variable x = 42
         set_response = rpc_call(

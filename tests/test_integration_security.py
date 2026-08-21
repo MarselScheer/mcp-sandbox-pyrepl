@@ -6,8 +6,8 @@ and session separation.
 
 from __future__ import annotations
 
+import docker
 import pytest
-from docker import DockerClient as _DockerClient
 
 from session_manager import SessionManager
 
@@ -25,13 +25,13 @@ class TestSecurityConstraints:
     def test_container_runs_as_non_root(
         self,
         session_manager: SessionManager,
-        docker_client: _DockerClient,
     ) -> None:
         """Container runs as non-root user (UID 1000)."""
         session_id = session_manager.create_session(python_version="3.12")
         info = session_manager.get_session(session_id)
         assert info is not None
         container_id = info["container_id"]
+        docker_client = docker.from_env()
 
         result = docker_client.containers.get(container_id).exec_run(
             ["python3", "-c", "import os; print(os.getuid())"]
@@ -48,13 +48,13 @@ class TestSecurityConstraints:
     def test_writing_outside_data_fails(
         self,
         session_manager: SessionManager,
-        docker_client: _DockerClient,
     ) -> None:
         """Writing outside /data/ fails with permission error."""
         session_id = session_manager.create_session(python_version="3.12")
         info = session_manager.get_session(session_id)
         assert info is not None
         container_id = info["container_id"]
+        docker_client = docker.from_env()
 
         result = docker_client.containers.get(container_id).exec_run(
             [
@@ -78,13 +78,13 @@ class TestSecurityConstraints:
     def test_writing_to_data_succeeds(
         self,
         session_manager: SessionManager,
-        docker_client: _DockerClient,
     ) -> None:
         """Writing to /data/ succeeds (writable volume)."""
         session_id = session_manager.create_session(python_version="3.12")
         info = session_manager.get_session(session_id)
         assert info is not None
         container_id = info["container_id"]
+        docker_client = docker.from_env()
 
         result = docker_client.containers.get(container_id).exec_run(
             [
@@ -104,12 +104,12 @@ class TestSecurityConstraints:
     def test_network_isolation_during_execution(
         self,
         session_manager: SessionManager,
-        docker_client: _DockerClient,
     ) -> None:
         """Outbound HTTP fails during code execution (network disconnected)."""
         session_id = session_manager.create_session(python_version="3.12")
         info = session_manager.get_session(session_id)
         assert info is not None
+        docker_client = docker.from_env()
 
         # Disconnect the container's network
         session_manager.network_disconnect(session_id)
@@ -145,7 +145,6 @@ class TestSecurityConstraints:
     def test_session_isolation_between_sessions(
         self,
         session_manager: SessionManager,
-        docker_client: _DockerClient,
     ) -> None:
         """Separate containers; ending one doesn't affect the other."""
         # Create two sessions
@@ -155,6 +154,7 @@ class TestSecurityConstraints:
         info_a = session_manager.get_session(sid_a)
         info_b = session_manager.get_session(sid_b)
         assert info_a is not None and info_b is not None
+        docker_client = docker.from_env()
 
         # Verify they have different container IDs
         assert info_a["container_id"] != info_b["container_id"]
