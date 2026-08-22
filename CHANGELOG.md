@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-08-22
+
+### Added
+
+- **`test-integration-parallel` Makefile target** — Runs integration tests in parallel via `pytest -n auto` (pytest-xdist), with UUID-scoped container names to avoid collisions. Expected runtime: ~35s on a 12-core machine (down from 5m25s baseline)
+- **`test-unit` Makefile target** — Dedicated target for fast unit tests (no Docker needed), designed for the TDD cycle
+- **`class_container` fixture** (`tests/integration/conftest.py`) — Class-scoped fixture that creates one container per test class instead of per test, eliminating per-test container startup overhead for tests that don't require session isolation
+- **`pytest-xdist` dependency** — Added to dev dependency group for parallel test execution support
+- **Timing instrumentation** — `time.perf_counter()` hooks in `session_manager` and `session` fixtures, plus per-RPC timing logs in `container_rpc()`, enabling per-phase runtime attribution for performance profiling
+
+### Changed
+
+- **Test directory restructured** — Tests split into `tests/unit/` and `tests/integration/` subdirectories for clear separation:
+  - Unit tests moved to `tests/unit/` (fast, no Docker needed)
+  - Integration tests moved to `tests/integration/` (require real Docker daemon)
+  - `conftest.py` moved to `tests/integration/conftest.py` (integration-only fixtures)
+  - `rpc_helpers.py` moved to `tests/integration/rpc_helpers.py`
+  - `pytest testpaths` updated to `["tests/unit", "tests/integration"]`
+- **`container_rpc()` polling mechanism** — Replaced `time.sleep(0.3)` fixed sleep with short-poll + exponential backoff (10ms initial, 100ms max, 10s total timeout). When the response is already present, the first iteration reads it within ~10ms — a 30x improvement over 300ms
+- **Integration test serial target** — `test-integration` now uses `--durations=0` to show per-test timing breakdown. Expected runtime: ~3m40s (down from ~5m25s baseline)
+- **Network isolation test** — Replaced `urllib.request.urlopen(timeout=5)` with `socket.socket()` and 0.5s timeout, detecting network disconnection in under 1 second instead of waiting for OS-level TCP timeout
+- **Execution timeout test** — Replaced `timeout 5` CLI wrapper with the entrypoint's own JSON-RPC timeout mechanism (`timeout=1.0`), exercising the production `ThreadTimeoutStrategy` path instead of an OS-level timeout
+- **`RealDockerClient` method signatures** — Reflowed multi-line signatures to single-line for consistency
+
+### Removed
+
+- **Integration test marker** — Removed the `integration` pytest marker and all related filtering from `pyproject.toml` and test files; all Docker tests now run by default
+
 ## [0.3.0] — 2026-08-21
 
 ### Added
