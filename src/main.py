@@ -7,6 +7,7 @@ using the factory pattern. No business logic lives here — just composition.
 from __future__ import annotations
 
 import logging
+import signal
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -219,32 +220,27 @@ def create_mcp_app(
 # ──────────────────────────────────────────────────────────────────────
 
 
-def setup_signal_handlers(
-    signal_handler: Callable[[int, Any], None] | None = None,
-    register: Callable[[int, Callable[[int, Any], None]], Any] | None = None,
-) -> None:
-    """Register signal handlers for graceful shutdown.
-
-    Args:
-        signal_handler: Optional custom handler function. If None, uses
-                        default graceful shutdown handler.
-        register: Optional signal registration function. Defaults to
-                  signal.signal. Injected for testability.
-    """
-    import signal as signal_module
-
-    handler = signal_handler or _default_shutdown_handler
-    register_func = register or signal_module.signal
-
-    register_func(signal_module.SIGINT, handler)
-    register_func(signal_module.SIGTERM, handler)
-
-
 def _default_shutdown_handler(signum: int, frame: Any) -> None:
     """Default signal handler for graceful shutdown."""
     _ = signum, frame
     logger.info("Shutdown signal received, exiting...")
     sys.exit(0)
+
+
+def setup_signal_handlers(
+    signal_handler: Callable[[int, Any], None] = _default_shutdown_handler,
+    register: Callable[[int, Callable[[int, Any], None]], Any] = signal.signal,
+) -> None:
+    """Register signal handlers for graceful shutdown.
+
+    Args:
+        signal_handler: Custom handler function. Defaults to a graceful
+                        shutdown handler that logs and exits.
+        register: Signal registration function. Defaults to
+                  ``signal.signal``. Injected for testability.
+    """
+    register(signal.SIGINT, signal_handler)
+    register(signal.SIGTERM, signal_handler)
 
 
 # ──────────────────────────────────────────────────────────────────────
