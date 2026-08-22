@@ -151,13 +151,13 @@ def create_docker_client() -> Any:
 
 def create_session_manager(
     config: dict[str, Any],
-    docker_client: Any = None,
+    docker_client: Any,
 ) -> Any:
     """Create a SessionManager from configuration.
 
     Args:
         config: Dict with sandbox configuration.
-        docker_client: Optional Docker client. If None, creates one.
+        docker_client: Docker client. Must be provided explicitly.
 
     Returns:
         A configured SessionManager instance.
@@ -178,8 +178,6 @@ def create_session_manager(
         ),
     )
 
-    if docker_client is None:
-        docker_client = create_docker_client()
     return SessionManager(docker=docker_client, config=sm_config)
 
 
@@ -190,13 +188,13 @@ def create_session_manager(
 
 def create_mcp_app(
     config: dict[str, Any],
-    docker_client: Any = None,
+    docker_client: Any,
 ) -> Any:
     """Create the FastMCP application with all tools registered.
 
     Args:
         config: Dict with sandbox configuration.
-        docker_client: Optional Docker client. If None, creates one.
+        docker_client: Docker client. Must be provided explicitly.
 
     Returns:
         A configured FastMCP instance.
@@ -283,18 +281,17 @@ def main() -> None:
     # Setup signal handlers
     setup_signal_handlers()
 
-    # Create and run the MCP app
-    mcp_app = create_mcp_app(config)
-    logger.info("Starting MCP Sandbox PyREPL server...")
-
-    # Try to detect Docker availability
+    # Create Docker client (fails fast if Docker is unavailable)
     try:
-        create_docker_client()
+        docker_client = create_docker_client()
     except RuntimeError as exc:
         logger.error(str(exc))
         sys.exit(1)
 
-    # Run the server
+    # Create and run the MCP app
+    mcp_app = create_mcp_app(config, docker_client=docker_client)
+    logger.info("Starting MCP Sandbox PyREPL server...")
+
     mcp_app.run()
 
 

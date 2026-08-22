@@ -25,6 +25,8 @@ test-integration:
 test-integration-parallel:
 	uv run pytest -v --tb=short -n auto tests/integration
 
+test-optimized-speed: test-unit test-integration-parallel
+
 lint:
 	uv run ruff check src/ tests/
 
