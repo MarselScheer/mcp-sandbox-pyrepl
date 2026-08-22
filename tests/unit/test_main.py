@@ -142,6 +142,3 @@ class TestLoadConfigErrors:
 
         assert "sandbox" in config
         assert "3.12" in config["sandbox"]["images"]
-
-
-

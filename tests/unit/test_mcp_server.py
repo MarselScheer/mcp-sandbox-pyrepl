@@ -11,7 +11,15 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from mcp_server import MCPToolHandler
+
+
+@pytest.fixture
+def dummy_image_registry() -> dict[str, str]:
+    """Minimal image registry for tests that don't exercise version listing."""
+    return {}
 
 
 class FakeSessionManager:
@@ -41,9 +49,7 @@ class FakeSessionManager:
     def network_disconnect(self, session_id: str) -> None:
         self.network_calls.append(("disconnect", session_id))
 
-    def send_rpc(
-        self, session_id: str, request: dict[str, Any]
-    ) -> dict[str, Any]:
+    def send_rpc(self, session_id: str, request: dict[str, Any]) -> dict[str, Any]:
         if self._send_rpc_raises:
             raise self._send_rpc_raises("Simulated RPC failure")
         return {"error": None, "stdout": "", "stderr": ""}
@@ -60,7 +66,9 @@ class FakeSessionManager:
 class TestExecutePythonCorruptedSession:
     """execute_python restarts session on corruption flag."""
 
-    def test_corrupted_session_triggers_restart(self) -> None:
+    def test_corrupted_session_triggers_restart(
+        self, dummy_image_registry: dict[str, str]
+    ) -> None:
         fake = FakeSessionManager()
         fake._send_exec_result = {
             "stdout": "",
@@ -70,7 +78,9 @@ class TestExecutePythonCorruptedSession:
             "Session may be corrupted.",
             "session_corrupted": True,
         }
-        handler = MCPToolHandler(session_manager=fake)
+        handler = MCPToolHandler(
+            session_manager=fake, image_registry=dummy_image_registry
+        )
 
         result = handler.execute_python(
             session_id="sess_test", code="import time; time.sleep(999)"
@@ -81,7 +91,9 @@ class TestExecutePythonCorruptedSession:
         # Session should have been restarted
         assert fake.last_restarted_session_id == "sess_test"
 
-    def test_normal_execution_does_not_trigger_restart(self) -> None:
+    def test_normal_execution_does_not_trigger_restart(
+        self, dummy_image_registry: dict[str, str]
+    ) -> None:
         fake = FakeSessionManager()
         fake._send_exec_result = {
             "stdout": "hello\n",
@@ -89,11 +101,11 @@ class TestExecutePythonCorruptedSession:
             "display": [],
             "error": None,
         }
-        handler = MCPToolHandler(session_manager=fake)
-
-        result = handler.execute_python(
-            session_id="sess_test", code="print('hello')"
+        handler = MCPToolHandler(
+            session_manager=fake, image_registry=dummy_image_registry
         )
+
+        result = handler.execute_python(session_id="sess_test", code="print('hello')")
 
         # Response should NOT include session_reset
         assert "session_reset" not in result
@@ -109,10 +121,14 @@ class TestExecutePythonCorruptedSession:
 class TestInstallPackagesExceptions:
     """install_packages handles send_rpc exceptions gracefully."""
 
-    def test_send_rpc_exception_returns_error(self) -> None:
+    def test_send_rpc_exception_returns_error(
+        self, dummy_image_registry: dict[str, str]
+    ) -> None:
         fake = FakeSessionManager()
         fake._send_rpc_raises = RuntimeError
-        handler = MCPToolHandler(session_manager=fake)
+        handler = MCPToolHandler(
+            session_manager=fake, image_registry=dummy_image_registry
+        )
 
         result = handler.install_packages(
             session_id="sess_test",
@@ -124,10 +140,14 @@ class TestInstallPackagesExceptions:
         assert "error" in result
         assert "Simulated RPC failure" in result["error"]
 
-    def test_exception_still_disconnects_network(self) -> None:
+    def test_exception_still_disconnects_network(
+        self, dummy_image_registry: dict[str, str]
+    ) -> None:
         fake = FakeSessionManager()
         fake._send_rpc_raises = RuntimeError
-        handler = MCPToolHandler(session_manager=fake)
+        handler = MCPToolHandler(
+            session_manager=fake, image_registry=dummy_image_registry
+        )
 
         handler.install_packages(
             session_id="sess_test",
@@ -140,10 +160,14 @@ class TestInstallPackagesExceptions:
             ("disconnect", "sess_test"),
         ]
 
-    def test_successful_install_disconnects_network(self) -> None:
+    def test_successful_install_disconnects_network(
+        self, dummy_image_registry: dict[str, str]
+    ) -> None:
         fake = FakeSessionManager()
         fake._send_rpc_raises = None  # No exception — success path
-        handler = MCPToolHandler(session_manager=fake)
+        handler = MCPToolHandler(
+            session_manager=fake, image_registry=dummy_image_registry
+        )
 
         handler.install_packages(
             session_id="sess_test",

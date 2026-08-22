@@ -30,12 +30,15 @@ class TestPackageInstallation:
     def test_install_and_use_package(
         self,
         class_container: dict,
+        dummy_image_registry: dict[str, str],
     ) -> None:
         """Install a package and use it in subsequent code execution."""
         manager = class_container["manager"]
         session_id = class_container["session_id"]
 
-        handler = MCPToolHandler(session_manager=manager)
+        handler = MCPToolHandler(
+            session_manager=manager, image_registry=dummy_image_registry
+        )
 
         install_result = handler.install_packages(
             session_id=session_id,

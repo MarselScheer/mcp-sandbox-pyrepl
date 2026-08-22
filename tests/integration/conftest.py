@@ -32,6 +32,17 @@ from session_manager import (
 logger = logging.getLogger(__name__)
 
 # ──────────────────────────────────────────────────────────────────────
+# Shared fixtures
+# ──────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def dummy_image_registry() -> dict[str, str]:
+    """Minimal image registry for tests that don't exercise version listing."""
+    return {}
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────────────────────────────────────
 

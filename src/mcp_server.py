@@ -24,16 +24,10 @@ class MCPToolHandler:
     def __init__(
         self,
         session_manager: Any,
-        image_registry: dict[str, str] | None = None,
+        image_registry: dict[str, str],
     ) -> None:
         self._sm = session_manager
-        self._image_registry = image_registry or {
-            "3.9": "sandbox-base:3.9",
-            "3.10": "sandbox-base:3.10",
-            "3.11": "sandbox-base:3.11",
-            "3.12": "sandbox-base:3.12",
-            "3.13": "sandbox-base:3.13",
-        }
+        self._image_registry = image_registry
 
     def create_session(
         self,
@@ -241,14 +235,14 @@ class MCPToolHandler:
 
 def create_mcp_app(
     session_manager: Any,
-    image_registry: dict[str, str] | None = None,
+    image_registry: dict[str, str],
     server_name: str = "mcp-sandbox-pyrepl",
 ) -> FastMCP:
     """Create and configure the FastMCP application.
 
     Args:
         session_manager: The SessionManager instance.
-        image_registry: Optional image registry mapping.
+        image_registry: Image registry mapping.
         server_name: MCP server name.
 
     Returns:

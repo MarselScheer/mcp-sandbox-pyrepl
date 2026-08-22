@@ -10,8 +10,17 @@ session-scoped fixture when Docker or the sandbox image is not available.
 
 from __future__ import annotations
 
+import pytest
+
 from mcp_server import MCPToolHandler
 from session_manager import SessionManager
+
+
+@pytest.fixture
+def dummy_image_registry() -> dict[str, str]:
+    """Minimal image registry for tests that don't exercise version listing."""
+    return {}
+
 
 # ──────────────────────────────────────────────────────────────────────
 # Tests: Creating sessions
@@ -22,9 +31,11 @@ class TestCreateSession:
     """Creating sessions via the MCP tool."""
 
     def test_create_session_default_version(
-        self, session_manager: SessionManager
+        self, session_manager: SessionManager, dummy_image_registry: dict[str, str]
     ) -> None:
-        handler = MCPToolHandler(session_manager=session_manager)
+        handler = MCPToolHandler(
+            session_manager=session_manager, image_registry=dummy_image_registry
+        )
 
         result = handler.create_session()
 
@@ -32,18 +43,22 @@ class TestCreateSession:
         assert result["session_id"].startswith("sess_")
 
     def test_create_session_with_python_version(
-        self, session_manager: SessionManager
+        self, session_manager: SessionManager, dummy_image_registry: dict[str, str]
     ) -> None:
-        handler = MCPToolHandler(session_manager=session_manager)
+        handler = MCPToolHandler(
+            session_manager=session_manager, image_registry=dummy_image_registry
+        )
 
         result = handler.create_session(python_version="3.12")
 
         assert result["session_id"].startswith("sess_")
 
     def test_create_session_with_custom_image(
-        self, session_manager: SessionManager
+        self, session_manager: SessionManager, dummy_image_registry: dict[str, str]
     ) -> None:
-        handler = MCPToolHandler(session_manager=session_manager)
+        handler = MCPToolHandler(
+            session_manager=session_manager, image_registry=dummy_image_registry
+        )
 
         result = handler.create_session(image="sandbox-base:3.12")
 
@@ -58,8 +73,12 @@ class TestCreateSession:
 class TestExecutePython:
     """Executing Python code via the MCP tool."""
 
-    def test_execute_code_in_session(self, session_manager: SessionManager) -> None:
-        handler = MCPToolHandler(session_manager=session_manager)
+    def test_execute_code_in_session(
+        self, session_manager: SessionManager, dummy_image_registry: dict[str, str]
+    ) -> None:
+        handler = MCPToolHandler(
+            session_manager=session_manager, image_registry=dummy_image_registry
+        )
         create_result = handler.create_session()
         session_id = create_result["session_id"]
 
@@ -69,9 +88,11 @@ class TestExecutePython:
         assert result.get("stdout") == "hello\n"
 
     def test_execute_code_with_custom_timeout(
-        self, session_manager: SessionManager
+        self, session_manager: SessionManager, dummy_image_registry: dict[str, str]
     ) -> None:
-        handler = MCPToolHandler(session_manager=session_manager)
+        handler = MCPToolHandler(
+            session_manager=session_manager, image_registry=dummy_image_registry
+        )
         create_result = handler.create_session()
         session_id = create_result["session_id"]
 
@@ -90,9 +111,13 @@ class TestExecutePython:
 class TestInstallPackages:
     """Installing packages via the MCP tool."""
 
-    def test_version_specific_install(self, session_manager: SessionManager) -> None:
+    def test_version_specific_install(
+        self, session_manager: SessionManager, dummy_image_registry: dict[str, str]
+    ) -> None:
         """Install a specific version of a package and verify the exact version."""
-        handler = MCPToolHandler(session_manager=session_manager)
+        handler = MCPToolHandler(
+            session_manager=session_manager, image_registry=dummy_image_registry
+        )
         create_result = handler.create_session()
         session_id = create_result["session_id"]
 
@@ -114,9 +139,13 @@ class TestInstallPackages:
             f"Expected markupsafe version 2.1.0, got: {exec_result}"
         )
 
-    def test_multi_package_install(self, session_manager: SessionManager) -> None:
+    def test_multi_package_install(
+        self, session_manager: SessionManager, dummy_image_registry: dict[str, str]
+    ) -> None:
         """Install multiple packages in a single call and verify all are importable."""
-        handler = MCPToolHandler(session_manager=session_manager)
+        handler = MCPToolHandler(
+            session_manager=session_manager, image_registry=dummy_image_registry
+        )
         create_result = handler.create_session()
         session_id = create_result["session_id"]
 
@@ -143,9 +172,11 @@ class TestInstallPackages:
         assert "pytz:" in output, f"Expected pytz to be importable, got: {exec_result}"
 
     def test_install_packages_connects_and_disconnects_network(
-        self, session_manager: SessionManager
+        self, session_manager: SessionManager, dummy_image_registry: dict[str, str]
     ) -> None:
-        handler = MCPToolHandler(session_manager=session_manager)
+        handler = MCPToolHandler(
+            session_manager=session_manager, image_registry=dummy_image_registry
+        )
         create_result = handler.create_session()
         session_id = create_result["session_id"]
 
@@ -202,25 +233,35 @@ class TestInstallPackages:
 class TestListSessions:
     """Listing and querying sessions."""
 
-    def test_list_sessions_empty(self, session_manager: SessionManager) -> None:
-        handler = MCPToolHandler(session_manager=session_manager)
+    def test_list_sessions_empty(
+        self, session_manager: SessionManager, dummy_image_registry: dict[str, str]
+    ) -> None:
+        handler = MCPToolHandler(
+            session_manager=session_manager, image_registry=dummy_image_registry
+        )
 
         result = handler.list_sessions()
 
         assert result == {"sessions": {}}
 
     def test_list_sessions_after_creation(
-        self, session_manager: SessionManager
+        self, session_manager: SessionManager, dummy_image_registry: dict[str, str]
     ) -> None:
-        handler = MCPToolHandler(session_manager=session_manager)
+        handler = MCPToolHandler(
+            session_manager=session_manager, image_registry=dummy_image_registry
+        )
         handler.create_session()
 
         result = handler.list_sessions()
 
         assert len(result["sessions"]) == 1
 
-    def test_get_session(self, session_manager: SessionManager) -> None:
-        handler = MCPToolHandler(session_manager=session_manager)
+    def test_get_session(
+        self, session_manager: SessionManager, dummy_image_registry: dict[str, str]
+    ) -> None:
+        handler = MCPToolHandler(
+            session_manager=session_manager, image_registry=dummy_image_registry
+        )
         create_result = handler.create_session()
         session_id = create_result["session_id"]
 
@@ -237,8 +278,12 @@ class TestListSessions:
 class TestEndSession:
     """Ending sessions."""
 
-    def test_end_session(self, session_manager: SessionManager) -> None:
-        handler = MCPToolHandler(session_manager=session_manager)
+    def test_end_session(
+        self, session_manager: SessionManager, dummy_image_registry: dict[str, str]
+    ) -> None:
+        handler = MCPToolHandler(
+            session_manager=session_manager, image_registry=dummy_image_registry
+        )
         create_result = handler.create_session()
         session_id = create_result["session_id"]
 
