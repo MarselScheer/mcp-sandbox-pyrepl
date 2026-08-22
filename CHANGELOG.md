@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-08-21
+
+### Added
+
+- **`mise.toml`** — New project tool version manager configuration via `mise` for `node`, `uv`, and `@fission-ai/openspec`
+- **`testcontainers` dependency** — Added `testcontainers >= 4.14.2` as a dev dependency for Docker container management during tests
+- **Error handling in `install_packages` MCP tool** — Added `except Exception` handler in `MCPToolHandler.install_packages()` to return structured error results instead of crashing
+
+### Changed
+
+- **Real Docker containers in all tests** — All Docker-dependent tests now use real Docker containers instead of `FakeDockerClient`/`FakeSessionManager` fakes:
+  - `test_session_manager.py` rewritten to use real containers via shared `session_manager` fixture
+  - `test_mcp_server.py` rewritten to use real containers via shared `session_manager` fixture
+  - `test_main.py` rewritten — factory tests use real Docker, no fakes
+  - Single version of `RealDockerClient` imported from `src/docker_adapter.py` (test copy deleted)
+  - `conftest.py` — Two-layer fixture architecture: session-scoped Docker availability check, function-scoped `SessionManager` with fresh containers
+  - Integration tests (`test_integration_*.py`) now share the same `session_manager` fixture
+  - `pytest addopts` — Removed `-m "not integration"` exclusion, all Docker tests run by default
+- **`RealDockerClient.attach_socket` fix** — Added `"logs": 1` to `attach_socket` params for proper log stream attachment
+- **`RealDockerClient.network_connect` idempotency** — Added no-op guard when container is already connected to the target network (avoids Docker 403 error)
+
+### Upgraded
+
+- **OpenSpec 1.8.0 → 1.9.0** — Upgraded the OpenSpec CLI (`@fission-ai/openspec`) and all associated commands and skills to version 1.9.0
+
 ## [0.2.1] — 2026-08-08
 
 ### Added
