@@ -9,16 +9,15 @@ from __future__ import annotations
 
 from typing import Any
 
+import docker
 import pytest
-from docker import DockerClient as _DockerClient
 
 from session_manager import SessionManager
 
 
-def _exec(
-    docker_client: _DockerClient, container_id: str, code: str
-) -> dict[str, Any]:
+def _exec(container_id: str, code: str) -> dict[str, Any]:
     """Execute Python code inside the container and return result."""
+    docker_client = docker.from_env()
     result = docker_client.containers.get(container_id).exec_run(
         ["python3", "-c", code]
     )
@@ -37,7 +36,6 @@ class TestFileIO:
     def test_host_writes_file_container_reads(
         self,
         session_manager: SessionManager,
-        docker_client: _DockerClient,
     ) -> None:
         """Write a file to /data via docker exec, container reads it."""
         session_id = session_manager.create_session(python_version="3.12")
@@ -53,7 +51,6 @@ class TestFileIO:
 
         # Verify the container can read it via docker exec
         read_result = _exec(
-            docker_client,
             container_id,
             "print(open('/data/hello.txt').read())",
         )
@@ -65,7 +62,6 @@ class TestFileIO:
     def test_container_writes_file_host_reads(
         self,
         session_manager: SessionManager,
-        docker_client: _DockerClient,
     ) -> None:
         """Container writes a file to /data/, verify via docker exec."""
         session_id = session_manager.create_session(python_version="3.12")
@@ -75,7 +71,6 @@ class TestFileIO:
 
         # Write a file inside the container's /data/ directory
         write_result = _exec(
-            docker_client,
             container_id,
             "open('/data/output.txt', 'w').write('Hello from container!')",
         )
@@ -91,7 +86,6 @@ class TestFileIO:
     def test_list_files(
         self,
         session_manager: SessionManager,
-        docker_client: _DockerClient,
     ) -> None:
         """Listing files in /data via docker exec."""
         session_id = session_manager.create_session(python_version="3.12")
@@ -101,7 +95,6 @@ class TestFileIO:
 
         # Write a file via docker exec and verify it shows up via list_files
         write_result = _exec(
-            docker_client,
             container_id,
             "open('/data/test_list.txt', 'w').write('list me')",
         )

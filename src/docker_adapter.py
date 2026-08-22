@@ -109,7 +109,7 @@ class RealDockerClient:
         """
         container = self.container_get(container_id)
         sock = container.attach_socket(
-            params={"stdin": 1, "stream": 1}
+            params={"stdin": 1, "stream": 1, "logs": 1}
         )
         if isinstance(sock, socket.socket):
             return io.TextIOWrapper(
@@ -149,7 +149,15 @@ class RealDockerClient:
     def network_connect(
         self, container_id: str, network: str = "bridge"
     ) -> None:
-        """Connect a container to a network."""
+        """Connect a container to a network.
+
+        If the container is already connected to the network, this is a no-op
+        (avoids Docker's 403 error for duplicate endpoint names).
+        """
+        container = self._client.containers.get(container_id)
+        networks = container.attrs.get("NetworkSettings", {}).get("Networks", {})
+        if network in networks:
+            return  # Already connected
         net = self._client.networks.get(network)
         net.connect(container_id)
 

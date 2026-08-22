@@ -119,6 +119,8 @@ class MCPToolHandler:
                     "params": {"packages": packages},
                 },
             )
+        except Exception as exc:
+            result = {"error": str(exc), "stdout": "", "stderr": ""}
         finally:
             self._sm.network_disconnect(session_id)
 

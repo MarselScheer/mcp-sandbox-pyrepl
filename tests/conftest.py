@@ -1,13 +1,14 @@
 """Shared fixtures for integration tests.
 
 Integration tests exercise the real Docker stack (SessionManager + Docker SDK).
-Fixtures are organized with session-scoped caching (image build, Docker client)
+Fixtures are organized with session-scoped caching (Docker availability check)
 and function-scoped isolation (session, session manager).
 
 Design:
 - SessionManager gets a RealDockerClient adapter wrapping the docker-py SDK.
 - All fixtures are self-skipping when Docker is unavailable.
 - Cleanup is guaranteed via pytest fixture finalization.
+- The sandbox image (``sandbox-base:3.12``) must be prebuilt via ``make build-image``.
 """
 
 from __future__ import annotations
@@ -16,8 +17,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from docker import DockerClient as _DockerClient
-from docker.errors import BuildError
 
 from docker_adapter import RealDockerClient
 from session_manager import (
@@ -26,17 +25,12 @@ from session_manager import (
 )
 
 # ──────────────────────────────────────────────────────────────────────
-# Real Docker Client Adapter  (defined in docker_adapter.py)
-# ──────────────────────────────────────────────────────────────────────
-
-
-# ──────────────────────────────────────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────────────────────────────────────
 
 
 def exec_in_container(
-    docker_client: _DockerClient, container_id: str, code: str
+    docker_client: Any, container_id: str, code: str
 ) -> dict[str, Any]:
     """Execute Python code inside the container via docker exec.
 
@@ -64,85 +58,49 @@ def exec_in_container(
 
 @pytest.fixture(scope="session")
 def docker_available() -> bool:
-    """Check if Docker daemon is available.
+    """Check if Docker daemon is available and the image exists.
 
-    Returns False (and skips all integration tests) if Docker is
-    not reachable.
+    Returns False (and skips all Docker-dependent tests) if Docker is
+    not reachable or ``sandbox-base:3.12`` is not present.
     """
     import docker
 
     try:
         client = docker.from_env()
         client.ping()
+        # Verify the prebuilt image exists — no building in tests
+        client.images.get("sandbox-base:3.12")
         return True
     except Exception:
         return False
 
 
-@pytest.fixture(scope="session")
-def docker_client(docker_available: bool) -> _DockerClient:
-    """Return a real Docker client instance.
-
-    Skips all tests in this session if Docker is unavailable.
-    """
-    if not docker_available:
-        pytest.skip("Docker daemon not available")
-
-    import docker
-
-    return docker.from_env()
-
-
-@pytest.fixture(scope="session")
-def sandbox_image(docker_client: _DockerClient) -> str:
-    """Build the sandbox-base:3.12 image.
-
-    Builds from the project's Dockerfile. Session-scoped so the
-    image is built once per test run and cached by Docker.
-    """
-    import docker
-
-    project_root = Path(__file__).resolve().parent.parent
-    dockerfile_path = project_root / "images" / "sandbox-base" / "Dockerfile"
-    tag = "sandbox-base:3.12"
-
-    try:
-        client = docker.from_env()
-        image, _ = client.images.build(
-            path=str(project_root),
-            dockerfile=str(dockerfile_path),
-            tag=tag,
-            buildargs={"PYTHON_VERSION": "3.12"},
-            rm=True,
-        )
-        return image.tags[0] if image.tags else tag
-    except BuildError as exc:
-        pytest.skip(f"Failed to build sandbox image: {exc}")
-        return tag  # unreachable, keeps type checker happy
-
-
 @pytest.fixture
-def session_manager(
-    docker_client: _DockerClient, sandbox_image: str
-) -> SessionManager:
+def session_manager(docker_available: bool) -> SessionManager:
     """Create a SessionManager with a real Docker client.
 
     Function-scoped so each test gets a clean SessionManager.
-    Uses the built sandbox image and a temporary data directory.
+    Uses the prebuilt ``sandbox-base:3.12`` image.
     """
+    if not docker_available:
+        pytest.skip("Docker or sandbox-base:3.12 image not available")
+
     import tempfile
 
+    import docker
+
+    raw_client = docker.from_env()
     data_dir = Path(tempfile.mkdtemp(prefix="sess_data_"))
     config = SessionManagerConfig(
         data_dir=data_dir,
         image_registry={
-            "3.12": sandbox_image,
+            "3.12": "sandbox-base:3.12",
         },
         default_python_version="3.12",
         network_name="bridge",
         container_user="1000",
     )
-    adapter = RealDockerClient(docker_client)
+    adapter = RealDockerClient(raw_client)
     return SessionManager(docker=adapter, config=config)
 
 

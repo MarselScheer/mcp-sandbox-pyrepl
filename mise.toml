@@ -1,0 +1,4 @@
+[tools]
+node = "26"
+"npm:@fission-ai/openspec" = "1.9.0"
+uv = "0.12.5"

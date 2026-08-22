@@ -1,6 +1,6 @@
 [project]
 name = "mcp-sandbox-pyrepl"
-version = "0.2.1"
+version = "0.3.0"
 description = "MCP server providing a sandboxed, stateful Python REPL via Docker"
 requires-python = ">=3.10"
 dependencies = [
@@ -21,7 +21,7 @@ exclude-newer = "30 days"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-v --tb=short --cov=src -m \"not integration\""
+addopts = "-v --tb=short --cov=src"
 markers = [
     "integration: Integration tests that require a real Docker daemon.",
 ]
@@ -45,5 +45,6 @@ dev = [
     "pytest>=8",
     "pytest-cov>=5",
     "ruff>=0.5",
+    "testcontainers>=4.14.2",
     "ty>=0.0.18",
 ]
