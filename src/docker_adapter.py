@@ -28,6 +28,7 @@ class RealDockerClient:
 
     def __init__(self, docker_client: _DockerClient) -> None:
         self._client = docker_client
+        self._rpc_counter = 0
 
     def containers_create(
         self,
@@ -188,6 +189,12 @@ class RealDockerClient:
 
         t0 = time.perf_counter()
 
+        # Assign a unique request ID so we can match the correct response
+        # when multiple RPC calls accumulate in the container's log stream.
+        self._rpc_counter += 1
+        request_id = self._rpc_counter
+        request["id"] = request_id
+
         container = self._client.containers.get(container_id)
         request_json = json.dumps(request)
 
@@ -222,16 +229,19 @@ class RealDockerClient:
                 if not line:
                     continue
                 try:
-                    elapsed = time.perf_counter() - t0
-                    import logging
+                    parsed = json.loads(line)
+                    if isinstance(parsed, dict) and parsed.get("id") == request_id:
+                        elapsed = time.perf_counter() - t0
+                        import logging
 
-                    logging.getLogger(__name__).info(
-                        "TIMING container_rpc (%s method=%s): %.3fs",
-                        container_id[:12],
-                        request.get("method", "?"),
-                        elapsed,
-                    )
-                    return json.loads(line)
+                        logging.getLogger(__name__).info(
+                            "TIMING container_rpc (%s method=%s id=%s): %.3fs",
+                            container_id[:12],
+                            request.get("method", "?"),
+                            request_id,
+                            elapsed,
+                        )
+                        return parsed
                 except json.JSONDecodeError:
                     continue
             time.sleep(backoff)

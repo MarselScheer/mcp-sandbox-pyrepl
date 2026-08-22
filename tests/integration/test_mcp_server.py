@@ -90,6 +90,58 @@ class TestExecutePython:
 class TestInstallPackages:
     """Installing packages via the MCP tool."""
 
+    def test_version_specific_install(self, session_manager: SessionManager) -> None:
+        """Install a specific version of a package and verify the exact version."""
+        handler = MCPToolHandler(session_manager=session_manager)
+        create_result = handler.create_session()
+        session_id = create_result["session_id"]
+
+        install_result = handler.install_packages(
+            session_id=session_id,
+            packages=[{"name": "markupsafe", "version": "2.1.0"}],
+        )
+
+        assert install_result["success"] is True, (
+            f"Version-specific install failed: {install_result.get('stderr')}"
+        )
+
+        exec_result = handler.execute_python(
+            session_id=session_id,
+            code="import markupsafe; print(markupsafe.__version__)",
+        )
+
+        assert exec_result.get("stdout", "").strip() == "2.1.0", (
+            f"Expected markupsafe version 2.1.0, got: {exec_result}"
+        )
+
+    def test_multi_package_install(self, session_manager: SessionManager) -> None:
+        """Install multiple packages in a single call and verify all are importable."""
+        handler = MCPToolHandler(session_manager=session_manager)
+        create_result = handler.create_session()
+        session_id = create_result["session_id"]
+
+        install_result = handler.install_packages(
+            session_id=session_id,
+            packages=[{"name": "six"}, {"name": "pytz"}],
+        )
+
+        assert install_result["success"] is True, (
+            f"Multi-package install failed: {install_result.get('stderr')}"
+        )
+
+        exec_result = handler.execute_python(
+            session_id=session_id,
+            code=(
+                "import six; import pytz; "
+                "print('six:', six.__version__, 'pytz:', pytz.__version__)"
+            ),
+        )
+
+        assert exec_result.get("error") is None, f"Package import failed: {exec_result}"
+        output = exec_result.get("stdout", "")
+        assert "six:" in output, f"Expected six to be importable, got: {exec_result}"
+        assert "pytz:" in output, f"Expected pytz to be importable, got: {exec_result}"
+
     def test_install_packages_connects_and_disconnects_network(
         self, session_manager: SessionManager
     ) -> None:
@@ -114,26 +166,35 @@ class TestInstallPackages:
         # in the finally block)
         assert handler.get_session(session_id) is not None
 
-    def test_install_single_package(self, session_manager: SessionManager) -> None:
-        handler = MCPToolHandler(session_manager=session_manager)
-        create_result = handler.create_session()
-        session_id = create_result["session_id"]
-
-        result = handler.install_packages(
+        # Verify network is actually disconnected after install:
+        # any subsequent execute_python call that attempts network
+        # access should fail with a socket/network error.
+        net_result = handler.execute_python(
             session_id=session_id,
-            packages=[{"name": "numpy"}],
+            code=(
+                "import socket; s = socket.socket(); "
+                "s.settimeout(5); s.connect(('example.com', 80))"
+            ),
         )
 
-        # Verify the handler returns a well-formed response
-        assert "success" in result
-        assert "stdout" in result
-        assert "stderr" in result
-        assert "error" in result
-        # Session should still be intact
-        assert handler.get_session(session_id) is not None
+        error = net_result.get("error")
+        stderr = net_result.get("stderr", "")
+        has_network_error = (
+            error is not None
+            or "No route to host" in stderr
+            or "Network is unreachable" in stderr
+            or "Connection refused" in stderr
+            or "Name or service not known" in stderr
+            or "Temporary failure in name resolution" in stderr
+            or "timed out" in stderr
+        )
+        assert has_network_error, (
+            f"Expected network failure after install, but got: {net_result}"
+        )
+
+    # ──────────────────────────────────────────────────────────────────────
 
 
-# ──────────────────────────────────────────────────────────────────────
 # Tests: Listing and querying sessions
 # ──────────────────────────────────────────────────────────────────────
 
