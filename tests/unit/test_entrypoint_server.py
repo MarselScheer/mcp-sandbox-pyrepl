@@ -13,6 +13,7 @@ import json
 from io import StringIO
 
 from entrypoint import (
+    RPCDispatcher,
     SessionServer,
 )
 
@@ -24,7 +25,12 @@ class TestSessionServer:
         """Run the server with given input and return parsed response lines."""
         stdin = StringIO(input_lines)
         stdout = StringIO()
-        server = SessionServer(stdin=stdin, stdout=stdout)
+        dispatcher = RPCDispatcher()
+        server = SessionServer(
+            dispatcher=dispatcher,
+            stdin=stdin,
+            stdout=stdout,
+        )
         server.run()
         return [
             json.loads(line) for line in stdout.getvalue().strip().split("\n") if line

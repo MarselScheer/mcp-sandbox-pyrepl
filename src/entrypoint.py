@@ -491,13 +491,13 @@ class SessionServer:
 
     def __init__(
         self,
-        dispatcher: RPCDispatcher | None = None,
-        stdin: TextIO | None = None,
-        stdout: TextIO | None = None,
+        dispatcher: RPCDispatcher,
+        stdin: TextIO = sys.stdin,
+        stdout: TextIO = sys.stdout,
     ) -> None:
-        self._dispatcher = dispatcher or RPCDispatcher()
-        self._stdin = stdin or sys.stdin
-        self._stdout = stdout or sys.stdout
+        self._dispatcher = dispatcher
+        self._stdin = stdin
+        self._stdout = stdout
 
     def run(self) -> None:
         """Main loop: read requests from stdin, dispatch, write responses."""
@@ -530,7 +530,23 @@ class SessionServer:
 
 def main() -> None:
     """Entry point for the entrypoint script."""
-    server = SessionServer()
+    config = RPCDispatcherConfig()
+    namespace = Namespace()
+    timeout = ThreadTimeoutStrategy(
+        hard_timeout_seconds=config.hard_timeout_seconds,
+    )
+    installer = PackageInstaller()
+    dispatcher = RPCDispatcher(
+        namespace=namespace,
+        timeout_strategy=timeout,
+        installer=installer,
+        config=config,
+    )
+    server = SessionServer(
+        dispatcher=dispatcher,
+        stdin=sys.stdin,
+        stdout=sys.stdout,
+    )
     server.run()
 
 
