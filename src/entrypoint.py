@@ -355,22 +355,15 @@ class RPCDispatcher:
 
     def __init__(
         self,
-        namespace: Namespace | None = None,
-        timeout_strategy: TimeoutStrategy | None = None,
-        installer: PackageInstaller | None = None,
-        config: RPCDispatcherConfig | None = None,
+        namespace: Namespace,
+        timeout_strategy: TimeoutStrategy,
+        installer: PackageInstaller,
+        config: RPCDispatcherConfig,
     ) -> None:
-        self._namespace = namespace or Namespace()
-        strategy = timeout_strategy or ThreadTimeoutStrategy(
-            hard_timeout_seconds=(
-                config.hard_timeout_seconds
-                if config
-                else RPCDispatcherConfig().hard_timeout_seconds
-            )
-        )
-        self._timeout = strategy
-        self._installer = installer or PackageInstaller()
-        self._config = config or RPCDispatcherConfig()
+        self._namespace = namespace
+        self._timeout = timeout_strategy
+        self._installer = installer
+        self._config = config
         self._shutdown_requested = False
 
     def handle(self, request: RPCRequest) -> dict[str, Any]:
