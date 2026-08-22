@@ -2,7 +2,8 @@
 
 Tests the ``MCPToolHandler`` behavior for:
 - Session corruption recovery (restart after ``session_corrupted`` flag)
-- Package install exception handling (``send_rpc`` raises → returns error, still disconnects)
+- Package install exception handling
+  (``send_rpc`` raises → returns error, still disconnects)
 
 These tests use minimal fake SessionManagers — no Docker, no containers, fast.
 """

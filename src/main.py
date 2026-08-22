@@ -136,7 +136,9 @@ def create_docker_client() -> Any:
         raw_client.ping()
         logger.info("Docker daemon is available")
         return RealDockerClient(raw_client)
-    except Exception as exc:  # pragma: no cover — only reachable when Docker is unavailable; testing it would require monkeypatching (anti-pattern)
+    except Exception as exc:  # pragma: no cover
+        # Only reachable when Docker is unavailable; testing it would
+        # require monkeypatching (anti-pattern)
         msg = (
             f"Docker is not available: {exc}. "
             "Make sure Docker is installed and running."

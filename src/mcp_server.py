@@ -74,7 +74,9 @@ class MCPToolHandler:
             # result.display == ["42"]
 
         Incorrect (display output lost):
-            result = execute_python(session_id, code="def double(x):\\n    return x * 2\\ndouble(21)")
+            result = execute_python(
+                session_id, code="def double(x):\\n    return x * 2\\ndouble(21)"
+            )
             # result.display == []  — display hook not triggered
 
         Args:
