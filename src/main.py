@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 # Configuration
 # ──────────────────────────────────────────────────────────────────────
 
-DEFAULT_CONFIG = {
+DEFAULT_CONFIG: dict[str, Any] = {
     "sandbox": {
         "images": {
             "3.9": "sandbox-base:3.9",
