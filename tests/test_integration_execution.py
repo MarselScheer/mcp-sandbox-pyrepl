@@ -34,17 +34,19 @@ def _decode_output(result: object) -> str:
 
 @pytest.mark.integration
 class TestCodeExecution:
-    """Code execution inside Docker containers."""
+    """Code execution inside Docker containers.
+
+    Uses a class-scoped container to eliminate per-test container
+    startup overhead. All tests share one container; tests that
+    exercise container/session lifecycle still use per-test sessions.
+    """
 
     def test_execute_code_captures_stdout(
         self,
-        session_manager: SessionManager,
+        class_container: dict,
     ) -> None:
         """Execute code that prints to stdout and verify the output."""
-        session_id = session_manager.create_session(python_version="3.12")
-        info = session_manager.get_session(session_id)
-        assert info is not None
-        container_id = info["container_id"]
+        container_id = class_container["container_id"]
         docker_client = docker.from_env()
 
         result = docker_client.containers.get(container_id).exec_run(
@@ -55,17 +57,12 @@ class TestCodeExecution:
         assert result.exit_code == 0
         assert "hello from docker" in output
 
-        session_manager.end_session(session_id)
-
     def test_syntax_error_reported(
         self,
-        session_manager: SessionManager,
+        class_container: dict,
     ) -> None:
         """Syntax errors are properly reported."""
-        session_id = session_manager.create_session(python_version="3.12")
-        info = session_manager.get_session(session_id)
-        assert info is not None
-        container_id = info["container_id"]
+        container_id = class_container["container_id"]
         docker_client = docker.from_env()
 
         result = docker_client.containers.get(container_id).exec_run(
@@ -76,17 +73,12 @@ class TestCodeExecution:
         assert result.exit_code != 0
         assert "SyntaxError" in output
 
-        session_manager.end_session(session_id)
-
     def test_runtime_error_reported(
         self,
-        session_manager: SessionManager,
+        class_container: dict,
     ) -> None:
         """Runtime errors are properly reported with traceback."""
-        session_id = session_manager.create_session(python_version="3.12")
-        info = session_manager.get_session(session_id)
-        assert info is not None
-        container_id = info["container_id"]
+        container_id = class_container["container_id"]
         docker_client = docker.from_env()
 
         result = docker_client.containers.get(container_id).exec_run(
@@ -97,17 +89,12 @@ class TestCodeExecution:
         assert result.exit_code != 0
         assert "ZeroDivisionError" in output
 
-        session_manager.end_session(session_id)
-
     def test_state_persistence_via_data_volume(
         self,
-        session_manager: SessionManager,
+        class_container: dict,
     ) -> None:
         """State persists across executions via the data volume."""
-        session_id = session_manager.create_session(python_version="3.12")
-        info = session_manager.get_session(session_id)
-        assert info is not None
-        container_id = info["container_id"]
+        container_id = class_container["container_id"]
         docker_client = docker.from_env()
 
         # Write state to /data/state.txt
@@ -125,37 +112,51 @@ class TestCodeExecution:
         assert read_result.exit_code == 0
         assert "42" in output
 
-        session_manager.end_session(session_id)
-
     def test_execution_timeout_enforced(
         self,
-        session_manager: SessionManager,
+        class_container: dict,
     ) -> None:
-        """Executions that exceed the timeout are terminated."""
-        session_id = session_manager.create_session(python_version="3.12")
-        info = session_manager.get_session(session_id)
-        assert info is not None
-        container_id = info["container_id"]
+        """Executions that exceed the timeout are terminated.
+
+        Uses the entrypoint's JSON-RPC exec method with a 1s timeout,
+        exercising the real ``ThreadTimeoutStrategy`` instead of the
+        OS-level ``timeout`` command. The total wall time includes
+        the entrypoint's hard_timeout (5s for thread cleanup), so
+        total elapsed should be under 10s — still a 3x improvement
+        over the baseline 30s.
+        """
+        container_id = class_container["container_id"]
         docker_client = docker.from_env()
 
         start = time.time()
-        result = docker_client.containers.get(container_id).exec_run(
-            ["timeout", "5", "python3", "-c", "import time; time.sleep(60)"],
+        response = rpc_call(
+            docker_client,
+            container_id,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "exec",
+                "params": {"code": "import time; time.sleep(60)", "timeout": 1.0},
+            },
         )
         elapsed = time.time() - start
 
-        output = _decode_output(result)
-
-        # The command should be killed/timed out within ~15 seconds
-        assert elapsed < 30
-        # The docker exec timeout may cause a non-zero exit or empty output
-        assert result.exit_code != 0 or "timed out" in output.lower()
-
-        session_manager.end_session(session_id)
+        result = response.get("result", response)
+        # The timeout should fire within ~6s (1s execution timeout + 5s
+        # hard_timeout for thread cleanup), well under 10s compared to
+        # the baseline 15-30s.
+        assert elapsed < 10.0, (
+            f"Expected timeout enforcement within 10s, got {elapsed:.2f}s"
+        )
+        error = result.get("error", "")
+        assert error is not None, f"Expected a timeout error, got: {result}"
+        assert any(kw in error.lower() for kw in ["timed out", "timeout"]), (
+            f"Expected timeout-related error, got: {error}"
+        )
 
     def test_display_hook_captures_expression_value(
         self,
-        session_manager: SessionManager,
+        class_container: dict,
     ) -> None:
         """Expression that produces a value triggers sys.displayhook capture.
 
@@ -164,10 +165,7 @@ class TestCodeExecution:
         like `[1, 2, 3]` trigger sys.displayhook, which is captured to the
         `display` field in the response.
         """
-        session_id = session_manager.create_session(python_version="3.12")
-        info = session_manager.get_session(session_id)
-        assert info is not None
-        container_id = info["container_id"]
+        container_id = class_container["container_id"]
         docker_client = docker.from_env()
 
         # Send JSON-RPC exec request through the entrypoint stdin/stdout path
@@ -188,17 +186,12 @@ class TestCodeExecution:
         assert "display" in result
         assert result["display"] == ["[1, 2, 3]"]
 
-        session_manager.end_session(session_id)
-
     def test_display_hook_captures_literal_value(
         self,
-        session_manager: SessionManager,
+        class_container: dict,
     ) -> None:
         """Literal expressions like `42` produce display hook output."""
-        session_id = session_manager.create_session(python_version="3.12")
-        info = session_manager.get_session(session_id)
-        assert info is not None
-        container_id = info["container_id"]
+        container_id = class_container["container_id"]
         docker_client = docker.from_env()
 
         response = rpc_call(
@@ -217,21 +210,16 @@ class TestCodeExecution:
         assert isinstance(result, dict)
         assert result["display"] == ["42"]
 
-        session_manager.end_session(session_id)
-
     def test_namespace_reset_clears_session_state(
         self,
-        session_manager: SessionManager,
+        class_container: dict,
     ) -> None:
         """Namespace reset clears all session state.
 
         Exercises the JSON-RPC stdin/stdout path: set a variable, verify it
         exists, send reset command, then verify the variable is gone.
         """
-        session_id = session_manager.create_session(python_version="3.12")
-        info = session_manager.get_session(session_id)
-        assert info is not None
-        container_id = info["container_id"]
+        container_id = class_container["container_id"]
         docker_client = docker.from_env()
 
         # Step 1: Set variable x = 42
@@ -292,5 +280,3 @@ class TestCodeExecution:
         error = verify_response["result"].get("error")
         assert error is not None
         assert "NameError" in error or "not defined" in error
-
-        session_manager.end_session(session_id)

@@ -196,6 +196,8 @@ class RealDockerClient:
         import json
         import time
 
+        t0 = time.perf_counter()
+
         container = self._client.containers.get(container_id)
         request_json = json.dumps(request)
 
@@ -212,23 +214,40 @@ class RealDockerClient:
         )
         container.exec_run(["python3", "-c", write_script])
 
-        # TODO: sleep-based polling is a race condition. Replace with a
-        #       synchronization mechanism (e.g. a ready file + inotify, or
-        #       switching to the attach_socket path with proper frame parsing).
-        time.sleep(0.3)
+        # Short-poll + exponential backoff loop to read the JSON-RPC
+        # response from the container's stdout. When the response is
+        # already present, the first iteration reads it within ~10ms.
+        # Under load, backoff scales up to 100ms per iteration.
+        # The entrypoint's ThreadTimeoutStrategy has a hard_timeout
+        # of 5s (for thread cleanup after timeout), so the total
+        # timeout allows up to 10s to account for that overhead.
+        backoff = 0.01  # 10ms initial
+        max_backoff = 0.1  # 100ms max
+        total_wait = 0.0
+        timeout = 10.0
+        while total_wait < timeout:
+            logs = container.logs(stdout=True, stderr=False, tail=5).decode(
+                "utf-8"
+            )
+            for line in reversed(logs.strip().split("\n")):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    elapsed = time.perf_counter() - t0
+                    import logging
+                    logging.getLogger(__name__).info(
+                        "TIMING container_rpc (%s method=%s): %.3fs",
+                        container_id[:12], request.get("method", "?"),
+                        elapsed,
+                    )
+                    return json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+            time.sleep(backoff)
+            total_wait += backoff
+            backoff = min(backoff * 1.5, max_backoff)
 
-        logs = container.logs(stdout=True, stderr=False, tail=5).decode(
-            "utf-8"
-        )
-
-        for line in reversed(logs.strip().split("\n")):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                return json.loads(line)
-            except json.JSONDecodeError:
-                continue
-
-        msg = f"No JSON-RPC response found in container logs: {logs}"
+        elapsed = time.perf_counter() - t0
+        msg = f"No JSON-RPC response found in container logs after {elapsed:.3f}s: {logs}"
         raise ConnectionError(msg)

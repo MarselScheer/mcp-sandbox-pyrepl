@@ -20,17 +20,20 @@ def _decode_output(result: object) -> str:
 
 @pytest.mark.integration
 class TestPackageInstallation:
-    """Package installation inside Docker containers."""
+    """Package installation inside Docker containers.
+
+    Uses a class-scoped container for tests that share a container
+    (``test_install_and_use_package``). The isolation test keeps its
+    own function-scoped ``session_manager`` to create two sessions
+    in separate containers.
+    """
 
     def test_install_and_use_package(
         self,
-        session_manager: SessionManager,
+        class_container: dict,
     ) -> None:
         """Install a package and use it in subsequent code execution."""
-        session_id = session_manager.create_session(python_version="3.12")
-        info = session_manager.get_session(session_id)
-        assert info is not None
-        container_id = info["container_id"]
+        container_id = class_container["container_id"]
         docker_client = docker.from_env()
 
         container = docker_client.containers.get(container_id)
@@ -69,13 +72,16 @@ class TestPackageInstallation:
         )
         assert "UTC" in verify_output
 
-        session_manager.end_session(session_id)
-
     def test_package_isolation_between_sessions(
         self,
         session_manager: SessionManager,
     ) -> None:
-        """Package installed in session A is unavailable in session B."""
+        """Package installed in session A is unavailable in session B.
+
+        Must use its own function-scoped session_manager (not the
+        class-scoped container) because it validates cross-session
+        isolation using TWO separate sessions.
+        """
         # Create two independent sessions
         session_a = session_manager.create_session(python_version="3.12")
         session_b = session_manager.create_session(python_version="3.12")

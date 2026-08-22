@@ -105,7 +105,7 @@ class TestSecurityConstraints:
         self,
         session_manager: SessionManager,
     ) -> None:
-        """Outbound HTTP fails during code execution (network disconnected)."""
+        """Outbound network fails during code execution (network disconnected)."""
         session_id = session_manager.create_session(python_version="3.12")
         info = session_manager.get_session(session_id)
         assert info is not None
@@ -115,24 +115,31 @@ class TestSecurityConstraints:
         session_manager.network_disconnect(session_id)
 
         container_id = info["container_id"]
+        # Use a short-timeout socket connect (not urllib with 5s timeout) so
+        # the test fails immediately on disconnected network — the kernel
+        # returns EHOSTUNREACH/ENETUNREACH within ~100ms.
         result = docker_client.containers.get(container_id).exec_run(
             [
                 "python3", "-c",
-                "import urllib.request; "
-                "urllib.request.urlopen('http://example.com', timeout=5)",
+                "import socket; "
+                "s = socket.socket(); "
+                "s.settimeout(0.5); "
+                "s.connect(('example.com', 80))",
             ]
         )
         output = _decode_output(result)
 
-        # Should fail with a network error
+        # Should fail with a network error — socket raises OSError with
+        # messages like "No route to host", "Connection refused",
+        # "Network is unreachable", or "Timed out".
         assert result.exit_code != 0
         assert any(
             msg in output.lower()
             for msg in [
-                "timeout",
                 "connection refused",
                 "no route to host",
                 "network is unreachable",
+                "timed out",
                 "name or service not known",
                 "temporary failure",
             ]

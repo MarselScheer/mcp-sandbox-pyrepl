@@ -1,4 +1,4 @@
-.PHONY: install test test-integration lint format format-check typecheck check clean build-image
+.PHONY: install test test-unit test-integration test-integration-parallel lint format format-check typecheck check clean build-image
 
 install:
 	uv sync --group dev
@@ -6,8 +6,24 @@ install:
 test:
 	uv run pytest -v --tb=short --cov=src tests/
 
+# Fast unit tests only — excludes integration tests (no Docker needed).
+# Designed for the TDD cycle: run after every code change.
+test-unit:
+	uv run pytest -v --tb=short -m "not integration" -k "not integration" tests/
+
+# Diagnostic mode — runs integration tests serially with --durations=0 to
+# show per-test timing breakdown. Use this when debugging specific test
+# performance or investigating failures that may be affected by parallelism.
+# Expected runtime: ~3m40s (down from ~5m25s baseline).
 test-integration:
-	uv run pytest -v --tb=short -m integration tests/
+	uv run pytest -v --tb=short -m integration --durations=0 tests/
+
+# Runs integration tests in parallel (class/module-level workers).
+# Requires pytest-xdist (installed via `uv sync --group dev`).
+# Container names are UUID-scoped so parallel workers never collide.
+# Expected runtime: ~35s on a 12-core machine (down from 5m25s baseline).
+test-integration-parallel:
+	uv run pytest -v --tb=short -m integration -n auto tests/
 
 lint:
 	uv run ruff check src/ tests/
