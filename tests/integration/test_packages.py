@@ -1,6 +1,6 @@
 """Integration tests for package installation inside sandbox containers.
 
-Tests package installation via uv pip install and package isolation
+Tests package installation via the MCP tool handler and package isolation
 between independent sessions.
 """
 
@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import docker
 
+from mcp_server import MCPToolHandler
 from session_manager import SessionManager
 
 
@@ -31,50 +32,30 @@ class TestPackageInstallation:
         class_container: dict,
     ) -> None:
         """Install a package and use it in subsequent code execution."""
-        container_id = class_container["container_id"]
-        docker_client = docker.from_env()
+        manager = class_container["manager"]
+        session_id = class_container["session_id"]
 
-        container = docker_client.containers.get(container_id)
+        handler = MCPToolHandler(session_manager=manager)
 
-        # Install package via uv pip install inside the session venv.
-        # --no-cache is required because the container's rootfs is read-only
-        # and uv's default cache dir (/home/sandbox/.cache/uv) is on the
-        # read-only rootfs.
-        install_result = container.exec_run(
-            [
-                "uv",
-                "pip",
-                "install",
-                "--no-cache",
-                "pytz",
-                "--python",
-                "/session/venv/bin/python",
-            ],
+        install_result = handler.install_packages(
+            session_id=session_id,
+            packages=[{"name": "pytz"}],
         )
-        install_output = _decode_output(install_result)
-        assert install_result.exit_code == 0, (
-            f"Package install failed: {install_output}"
+
+        assert install_result["success"] is True, (
+            f"Package install failed: {install_result.get('stderr')}"
         )
 
         # Verify the package is available by importing and using it
-        venv_env = {
-            "VIRTUAL_ENV": "/session/venv",
-            "PATH": "/session/venv/bin:/usr/local/bin:/usr/bin:/bin",
-        }
-        verify_result = container.exec_run(
-            [
-                "python3",
-                "-c",
-                "import pytz; tz = pytz.timezone('UTC'); print(tz.zone)",
-            ],
-            environment=venv_env,
+        exec_result = handler.execute_python(
+            session_id=session_id,
+            code="import pytz; tz = pytz.timezone('UTC'); print(tz.zone)",
         )
-        verify_output = _decode_output(verify_result)
 
-        assert verify_result.exit_code == 0, (
-            f"Package verification failed: {verify_output}"
+        assert exec_result.get("error") is None, (
+            f"Package verification failed: {exec_result}"
         )
-        assert "UTC" in verify_output
+        assert "UTC" in exec_result.get("stdout", "")
 
     def test_package_isolation_between_sessions(
         self,
