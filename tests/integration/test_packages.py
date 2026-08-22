@@ -7,7 +7,6 @@ between independent sessions.
 from __future__ import annotations
 
 import docker
-import pytest
 
 from session_manager import SessionManager
 
@@ -18,19 +17,21 @@ def _decode_output(result: object) -> str:
     return output.decode("utf-8") if isinstance(output, bytes) else output
 
 
-@pytest.mark.integration
 class TestPackageInstallation:
-    """Package installation inside Docker containers."""
+    """Package installation inside Docker containers.
+
+    Uses a class-scoped container for tests that share a container
+    (``test_install_and_use_package``). The isolation test keeps its
+    own function-scoped ``session_manager`` to create two sessions
+    in separate containers.
+    """
 
     def test_install_and_use_package(
         self,
-        session_manager: SessionManager,
+        class_container: dict,
     ) -> None:
         """Install a package and use it in subsequent code execution."""
-        session_id = session_manager.create_session(python_version="3.12")
-        info = session_manager.get_session(session_id)
-        assert info is not None
-        container_id = info["container_id"]
+        container_id = class_container["container_id"]
         docker_client = docker.from_env()
 
         container = docker_client.containers.get(container_id)
@@ -41,8 +42,13 @@ class TestPackageInstallation:
         # read-only rootfs.
         install_result = container.exec_run(
             [
-                "uv", "pip", "install", "--no-cache", "pytz",
-                "--python", "/session/venv/bin/python",
+                "uv",
+                "pip",
+                "install",
+                "--no-cache",
+                "pytz",
+                "--python",
+                "/session/venv/bin/python",
             ],
         )
         install_output = _decode_output(install_result)
@@ -57,7 +63,8 @@ class TestPackageInstallation:
         }
         verify_result = container.exec_run(
             [
-                "python3", "-c",
+                "python3",
+                "-c",
                 "import pytz; tz = pytz.timezone('UTC'); print(tz.zone)",
             ],
             environment=venv_env,
@@ -69,13 +76,16 @@ class TestPackageInstallation:
         )
         assert "UTC" in verify_output
 
-        session_manager.end_session(session_id)
-
     def test_package_isolation_between_sessions(
         self,
         session_manager: SessionManager,
     ) -> None:
-        """Package installed in session A is unavailable in session B."""
+        """Package installed in session A is unavailable in session B.
+
+        Must use its own function-scoped session_manager (not the
+        class-scoped container) because it validates cross-session
+        isolation using TWO separate sessions.
+        """
         # Create two independent sessions
         session_a = session_manager.create_session(python_version="3.12")
         session_b = session_manager.create_session(python_version="3.12")
@@ -94,8 +104,13 @@ class TestPackageInstallation:
         # read-only rootfs.
         install_result = container_a.exec_run(
             [
-                "uv", "pip", "install", "--no-cache", "pytz",
-                "--python", "/session/venv/bin/python",
+                "uv",
+                "pip",
+                "install",
+                "--no-cache",
+                "pytz",
+                "--python",
+                "/session/venv/bin/python",
             ],
         )
         install_output = _decode_output(install_result)

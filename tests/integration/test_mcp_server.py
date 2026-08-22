@@ -58,16 +58,12 @@ class TestCreateSession:
 class TestExecutePython:
     """Executing Python code via the MCP tool."""
 
-    def test_execute_code_in_session(
-        self, session_manager: SessionManager
-    ) -> None:
+    def test_execute_code_in_session(self, session_manager: SessionManager) -> None:
         handler = MCPToolHandler(session_manager=session_manager)
         create_result = handler.create_session()
         session_id = create_result["session_id"]
 
-        result = handler.execute_python(
-            session_id=session_id, code="print('hello')"
-        )
+        result = handler.execute_python(session_id=session_id, code="print('hello')")
 
         assert "stdout" in result
         assert result.get("stdout") == "hello\n"
@@ -118,9 +114,7 @@ class TestInstallPackages:
         # in the finally block)
         assert handler.get_session(session_id) is not None
 
-    def test_install_single_package(
-        self, session_manager: SessionManager
-    ) -> None:
+    def test_install_single_package(self, session_manager: SessionManager) -> None:
         handler = MCPToolHandler(session_manager=session_manager)
         create_result = handler.create_session()
         session_id = create_result["session_id"]
@@ -147,9 +141,7 @@ class TestInstallPackages:
 class TestListSessions:
     """Listing and querying sessions."""
 
-    def test_list_sessions_empty(
-        self, session_manager: SessionManager
-    ) -> None:
+    def test_list_sessions_empty(self, session_manager: SessionManager) -> None:
         handler = MCPToolHandler(session_manager=session_manager)
 
         result = handler.list_sessions()
@@ -166,9 +158,7 @@ class TestListSessions:
 
         assert len(result["sessions"]) == 1
 
-    def test_get_session(
-        self, session_manager: SessionManager
-    ) -> None:
+    def test_get_session(self, session_manager: SessionManager) -> None:
         handler = MCPToolHandler(session_manager=session_manager)
         create_result = handler.create_session()
         session_id = create_result["session_id"]
@@ -186,9 +176,7 @@ class TestListSessions:
 class TestEndSession:
     """Ending sessions."""
 
-    def test_end_session(
-        self, session_manager: SessionManager
-    ) -> None:
+    def test_end_session(self, session_manager: SessionManager) -> None:
         handler = MCPToolHandler(session_manager=session_manager)
         create_result = handler.create_session()
         session_id = create_result["session_id"]
@@ -208,9 +196,7 @@ class TestEndSession:
 class TestListPythonVersions:
     """Listing available Python versions."""
 
-    def test_list_versions(
-        self, session_manager: SessionManager
-    ) -> None:
+    def test_list_versions(self, session_manager: SessionManager) -> None:
         handler = MCPToolHandler(
             session_manager=session_manager,
             image_registry={

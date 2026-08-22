@@ -33,9 +33,7 @@ def _exec_in_container_raw(container_id: str, code: str) -> dict[str, Any]:
     import docker as docker_py
 
     client = docker_py.from_env()
-    result = client.containers.get(container_id).exec_run(
-        ["python3", "-c", code]
-    )
+    result = client.containers.get(container_id).exec_run(["python3", "-c", code])
     output = (
         result.output.decode("utf-8")
         if isinstance(result.output, bytes)
@@ -139,9 +137,7 @@ class TestSessionManagerCreate:
         cap_val = int(result["output"].strip().split("=")[1])
         # With cap_drop ALL, effective capability set should be 0
         # (or very minimal — bounding set minimums)
-        assert cap_val == 0, (
-            f"Expected no capabilities, got {cap_val}"
-        )
+        assert cap_val == 0, f"Expected no capabilities, got {cap_val}"
 
     def test_create_session_uses_named_volumes(
         self, session_manager: SessionManager
@@ -218,9 +214,7 @@ class TestSessionManagerEnd:
 
         assert session_id not in session_manager.list_sessions()
 
-    def test_end_session_is_idempotent(
-        self, session_manager: SessionManager
-    ) -> None:
+    def test_end_session_is_idempotent(self, session_manager: SessionManager) -> None:
         session_id = session_manager.create_session(python_version="3.12")
 
         session_manager.end_session(session_id)
@@ -273,17 +267,13 @@ class TestSessionManagerList:
 class TestSessionManagerNetwork:
     """Network connect/disconnect for package installation."""
 
-    def test_network_connect(
-        self, session_manager: SessionManager
-    ) -> None:
+    def test_network_connect(self, session_manager: SessionManager) -> None:
         sid = session_manager.create_session(python_version="3.12")
 
         # Connect should succeed without error
         session_manager.network_connect(sid)
 
-    def test_network_disconnect(
-        self, session_manager: SessionManager
-    ) -> None:
+    def test_network_disconnect(self, session_manager: SessionManager) -> None:
         sid = session_manager.create_session(python_version="3.12")
         session_manager.network_connect(sid)
 

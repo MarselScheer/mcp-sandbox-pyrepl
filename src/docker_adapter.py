@@ -88,9 +88,7 @@ class RealDockerClient:
         """Get a container by ID."""
         return self._client.containers.get(container_id)
 
-    def container_remove(
-        self, container_id: str, force: bool = False
-    ) -> None:
+    def container_remove(self, container_id: str, force: bool = False) -> None:
         """Remove a container."""
         container = self.container_get(container_id)
         container.remove(force=force)
@@ -108,9 +106,7 @@ class RealDockerClient:
         it in a ``TextIOWrapper`` for text I/O.
         """
         container = self.container_get(container_id)
-        sock = container.attach_socket(
-            params={"stdin": 1, "stream": 1, "logs": 1}
-        )
+        sock = container.attach_socket(params={"stdin": 1, "stream": 1, "logs": 1})
         if isinstance(sock, socket.socket):
             return io.TextIOWrapper(
                 io.BufferedWriter(sock.makefile("wb")),
@@ -123,9 +119,7 @@ class RealDockerClient:
         msg = f"Unexpected stdin type: {type(sock)}"
         raise TypeError(msg)
 
-    def container_exec_run(
-        self, container_id: str, cmd: list[str]
-    ) -> dict[str, Any]:
+    def container_exec_run(self, container_id: str, cmd: list[str]) -> dict[str, Any]:
         """Run a command inside the container and return the result."""
         container = self._client.containers.get(container_id)
         result = container.exec_run(cmd)
@@ -139,16 +133,12 @@ class RealDockerClient:
             "output": output,
         }
 
-    def network_disconnect(
-        self, container_id: str, network: str = "bridge"
-    ) -> None:
+    def network_disconnect(self, container_id: str, network: str = "bridge") -> None:
         """Disconnect a container from a network."""
         net = self._client.networks.get(network)
         net.disconnect(container_id)
 
-    def network_connect(
-        self, container_id: str, network: str = "bridge"
-    ) -> None:
+    def network_connect(self, container_id: str, network: str = "bridge") -> None:
         """Connect a container to a network.
 
         If the container is already connected to the network, this is a no-op
@@ -196,6 +186,8 @@ class RealDockerClient:
         import json
         import time
 
+        t0 = time.perf_counter()
+
         container = self._client.containers.get(container_id)
         request_json = json.dumps(request)
 
@@ -212,23 +204,42 @@ class RealDockerClient:
         )
         container.exec_run(["python3", "-c", write_script])
 
-        # TODO: sleep-based polling is a race condition. Replace with a
-        #       synchronization mechanism (e.g. a ready file + inotify, or
-        #       switching to the attach_socket path with proper frame parsing).
-        time.sleep(0.3)
+        # Short-poll + exponential backoff loop to read the JSON-RPC
+        # response from the container's stdout. When the response is
+        # already present, the first iteration reads it within ~10ms.
+        # Under load, backoff scales up to 100ms per iteration.
+        # The entrypoint's ThreadTimeoutStrategy has a hard_timeout
+        # of 5s (for thread cleanup after timeout), so the total
+        # timeout allows up to 10s to account for that overhead.
+        backoff = 0.01  # 10ms initial
+        max_backoff = 0.1  # 100ms max
+        total_wait = 0.0
+        timeout = 10.0
+        while total_wait < timeout:
+            logs = container.logs(stdout=True, stderr=False, tail=5).decode("utf-8")
+            for line in reversed(logs.strip().split("\n")):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    elapsed = time.perf_counter() - t0
+                    import logging
 
-        logs = container.logs(stdout=True, stderr=False, tail=5).decode(
-            "utf-8"
+                    logging.getLogger(__name__).info(
+                        "TIMING container_rpc (%s method=%s): %.3fs",
+                        container_id[:12],
+                        request.get("method", "?"),
+                        elapsed,
+                    )
+                    return json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+            time.sleep(backoff)
+            total_wait += backoff
+            backoff = min(backoff * 1.5, max_backoff)
+
+        elapsed = time.perf_counter() - t0
+        msg = (
+            f"No JSON-RPC response found in container logs after {elapsed:.3f}s: {logs}"
         )
-
-        for line in reversed(logs.strip().split("\n")):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                return json.loads(line)
-            except json.JSONDecodeError:
-                continue
-
-        msg = f"No JSON-RPC response found in container logs: {logs}"
         raise ConnectionError(msg)

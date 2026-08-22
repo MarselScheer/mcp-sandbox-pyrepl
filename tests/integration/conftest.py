@@ -9,10 +9,15 @@ Design:
 - All fixtures are self-skipping when Docker is unavailable.
 - Cleanup is guaranteed via pytest fixture finalization.
 - The sandbox image (``sandbox-base:3.12``) must be prebuilt via ``make build-image``.
+- Timing hooks wrap fixture setup/teardown boundaries with ``time.perf_counter()``
+  for per-phase runtime attribution (profile before optimizing).
 """
 
 from __future__ import annotations
 
+import logging
+import time
+from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +28,8 @@ from session_manager import (
     SessionManager,
     SessionManagerConfig,
 )
+
+logger = logging.getLogger(__name__)
 
 # ──────────────────────────────────────────────────────────────────────
 # Helpers
@@ -89,6 +96,7 @@ def session_manager(docker_available: bool) -> SessionManager:
 
     import docker
 
+    t0 = time.perf_counter()
     raw_client = docker.from_env()
     data_dir = Path(tempfile.mkdtemp(prefix="sess_data_"))
     config = SessionManagerConfig(
@@ -101,7 +109,10 @@ def session_manager(docker_available: bool) -> SessionManager:
         container_user="1000",
     )
     adapter = RealDockerClient(raw_client)
-    return SessionManager(docker=adapter, config=config)
+    manager = SessionManager(docker=adapter, config=config)
+    elapsed = time.perf_counter() - t0
+    logger.info("TIMING session_manager fixture setup: %.3fs", elapsed)
+    return manager
 
 
 @pytest.fixture
@@ -111,6 +122,70 @@ def session(session_manager: SessionManager) -> str:
     Function-scoped: each test gets its own container, automatically
     cleaned up after the test completes.
     """
+    t0 = time.perf_counter()
     session_id = session_manager.create_session(python_version="3.12")
+    create_elapsed = time.perf_counter() - t0
+    logger.info("TIMING container_create (%s): %.3fs", session_id, create_elapsed)
+
     yield session_id
+
+    t1 = time.perf_counter()
     session_manager.end_session(session_id)
+    teardown_elapsed = time.perf_counter() - t1
+    logger.info("TIMING end_session (%s): %.3fs", session_id, teardown_elapsed)
+
+
+@pytest.fixture(scope="class")
+def class_container(docker_available: bool) -> Generator[dict[str, Any], None, None]:
+    """Create a single session manager + container for an entire test class.
+
+    Class-scoped: all tests in the class share one container and one
+    SessionManager, eliminating per-test container startup overhead.
+    Tests that need session isolation should use the function-scoped
+    ``session_manager`` or ``session`` fixture instead.
+
+    Yields a dict with keys:
+    - ``manager``: the SessionManager instance
+    - ``session_id``: the single session ID shared across the class
+    - ``container_id``: the Docker container ID
+    """
+    if not docker_available:
+        pytest.skip("Docker or sandbox-base:3.12 image not available")
+
+    import tempfile
+
+    import docker as _docker
+
+    raw_client = _docker.from_env()
+    data_dir = Path(tempfile.mkdtemp(prefix="sess_data_"))
+    config = SessionManagerConfig(
+        data_dir=data_dir,
+        image_registry={
+            "3.12": "sandbox-base:3.12",
+        },
+        default_python_version="3.12",
+        network_name="bridge",
+        container_user="1000",
+    )
+    adapter = RealDockerClient(raw_client)
+    manager = SessionManager(docker=adapter, config=config)
+
+    t0 = time.perf_counter()
+    session_id = manager.create_session(python_version="3.12")
+    create_elapsed = time.perf_counter() - t0
+    logger.info("TIMING class_container create: %.3fs", create_elapsed)
+
+    info = manager.get_session(session_id)
+    assert info is not None
+    container_id = info["container_id"]
+
+    yield {
+        "manager": manager,
+        "session_id": session_id,
+        "container_id": container_id,
+    }
+
+    t1 = time.perf_counter()
+    manager.end_session(session_id)
+    teardown_elapsed = time.perf_counter() - t1
+    logger.info("TIMING class_container end: %.3fs", teardown_elapsed)

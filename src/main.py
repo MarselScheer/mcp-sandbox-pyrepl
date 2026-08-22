@@ -256,9 +256,7 @@ def main() -> None:
     """Main entry point for the MCP Sandbox PyREPL server."""
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description="MCP Sandbox PyREPL Server"
-    )
+    parser = argparse.ArgumentParser(description="MCP Sandbox PyREPL Server")
     parser.add_argument(
         "--config",
         "-c",

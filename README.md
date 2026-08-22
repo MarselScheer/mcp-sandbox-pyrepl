@@ -173,7 +173,10 @@ uv run mcp-sandbox-pyrepl --config /path/to/config.yaml
 make check
 
 # Or individually
-make test        # Run tests with coverage
+make test        # Run all tests with coverage (unit + integration)
+make test-unit   # Run unit tests only (fast, no Docker needed)
+make test-integration        # Run integration tests serially
+make test-integration-parallel  # Run integration tests in parallel
 make lint        # Run ruff linter
 make format      # Format code with ruff
 make typecheck   # Run type checker (ty)
@@ -191,14 +194,24 @@ mcp-sandbox-pyrepl/
 │   ├── session_manager.py       # Docker container lifecycle
 │   └── entrypoint.py            # Container-side JSON-RPC server
 ├── tests/
-│   ├── test_main.py             # Config loading, factories, signals
-│   ├── test_mcp_server.py       # MCP tool handler behavior
-│   ├── test_session_manager.py  # Session lifecycle with fake Docker
-│   ├── test_entrypoint_dispatcher.py   # JSON-RPC routing
-│   ├── test_entrypoint_namespace.py    # Code execution namespace
-│   ├── test_entrypoint_server.py       # stdin/stdout loop
-│   ├── test_entrypoint_timeout.py      # Timeout strategy
-│   └── test_toolchain.py        # Dev toolchain smoke tests
+│   ├── unit/
+│   │   ├── test_entrypoint_dispatcher.py   # JSON-RPC routing
+│   │   ├── test_entrypoint_namespace.py    # Code execution namespace
+│   │   ├── test_entrypoint_server.py       # stdin/stdout loop
+│   │   ├── test_entrypoint_timeout.py      # Timeout strategy
+│   │   ├── test_main.py             # Config loading, signals
+│   │   └── test_toolchain.py        # Dev toolchain smoke tests
+│   └── integration/
+│       ├── conftest.py               # Docker fixtures (session_manager, class_container)
+│       ├── rpc_helpers.py            # JSON-RPC helpers for container communication
+│       ├── test_execution.py         # Code execution inside containers
+│       ├── test_files.py             # File I/O via /data volume
+│       ├── test_main.py              # Factory functions (create_session_manager, create_mcp_app)
+│       ├── test_mcp_server.py        # MCP tool handler behavior
+│       ├── test_packages.py          # Package installation
+│       ├── test_security.py          # Security constraints (non-root, network isolation)
+│       ├── test_session.py           # Session lifecycle (create, list, get, end)
+│       └── test_session_manager.py   # Session manager with real Docker
 ├── images/
 │   └── sandbox-base/
 │       └── Dockerfile           # Base Docker image definition

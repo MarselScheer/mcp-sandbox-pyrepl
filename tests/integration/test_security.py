@@ -7,7 +7,6 @@ and session separation.
 from __future__ import annotations
 
 import docker
-import pytest
 
 from session_manager import SessionManager
 
@@ -18,7 +17,6 @@ def _decode_output(result: object) -> str:
     return output.decode("utf-8") if isinstance(output, bytes) else output
 
 
-@pytest.mark.integration
 class TestSecurityConstraints:
     """Security constraints on Docker containers."""
 
@@ -39,9 +37,7 @@ class TestSecurityConstraints:
         output = _decode_output(result)
 
         assert result.exit_code == 0, f"Failed to get UID: {output}"
-        assert "1000" in output, (
-            f"Expected UID 1000, got: {output.strip()}"
-        )
+        assert "1000" in output, f"Expected UID 1000, got: {output.strip()}"
 
         session_manager.end_session(session_id)
 
@@ -58,7 +54,8 @@ class TestSecurityConstraints:
 
         result = docker_client.containers.get(container_id).exec_run(
             [
-                "python3", "-c",
+                "python3",
+                "-c",
                 "open('/home/sandbox/test.txt', 'w').write('should fail')",
             ]
         )
@@ -69,7 +66,10 @@ class TestSecurityConstraints:
         # read-only rootfs.
         assert result.exit_code != 0
         error_keywords = [
-            "read-only", "permission", "error", "denied",
+            "read-only",
+            "permission",
+            "error",
+            "denied",
         ]
         assert any(kw in output.lower() for kw in error_keywords)
 
@@ -88,15 +88,14 @@ class TestSecurityConstraints:
 
         result = docker_client.containers.get(container_id).exec_run(
             [
-                "python3", "-c",
+                "python3",
+                "-c",
                 "open('/data/test.txt', 'w').write('should succeed'); print('ok')",
             ]
         )
         output = _decode_output(result)
 
-        assert result.exit_code == 0, (
-            f"Writing to /data/ failed: {output}"
-        )
+        assert result.exit_code == 0, f"Writing to /data/ failed: {output}"
         assert "ok" in output
 
         session_manager.end_session(session_id)
@@ -105,7 +104,7 @@ class TestSecurityConstraints:
         self,
         session_manager: SessionManager,
     ) -> None:
-        """Outbound HTTP fails during code execution (network disconnected)."""
+        """Outbound network fails during code execution (network disconnected)."""
         session_id = session_manager.create_session(python_version="3.12")
         info = session_manager.get_session(session_id)
         assert info is not None
@@ -115,24 +114,32 @@ class TestSecurityConstraints:
         session_manager.network_disconnect(session_id)
 
         container_id = info["container_id"]
+        # Use a short-timeout socket connect (not urllib with 5s timeout) so
+        # the test fails immediately on disconnected network — the kernel
+        # returns EHOSTUNREACH/ENETUNREACH within ~100ms.
         result = docker_client.containers.get(container_id).exec_run(
             [
-                "python3", "-c",
-                "import urllib.request; "
-                "urllib.request.urlopen('http://example.com', timeout=5)",
+                "python3",
+                "-c",
+                "import socket; "
+                "s = socket.socket(); "
+                "s.settimeout(0.5); "
+                "s.connect(('example.com', 80))",
             ]
         )
         output = _decode_output(result)
 
-        # Should fail with a network error
+        # Should fail with a network error — socket raises OSError with
+        # messages like "No route to host", "Connection refused",
+        # "Network is unreachable", or "Timed out".
         assert result.exit_code != 0
         assert any(
             msg in output.lower()
             for msg in [
-                "timeout",
                 "connection refused",
                 "no route to host",
                 "network is unreachable",
+                "timed out",
                 "name or service not known",
                 "temporary failure",
             ]
