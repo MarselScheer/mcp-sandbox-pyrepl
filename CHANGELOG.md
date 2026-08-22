@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] — 2026-08-22
+
+### Added
+
+- **OpenSpec fast-forward workflow** — New `opsx-ff` command (`.opencode/commands/opsx-ff.md`) and `openspec-ff-change` skill (`.opencode/skills/openspec-ff-change/SKILL.md`) for quickly creating all OpenSpec artifacts needed for implementation without stepping through each one individually
+
+### Changed
+
+- **Coverage report output** — Makefile now outputs non-covered lines after test runs for easier identification of untested code
+
+### Documentation
+
+- **`execute_python()` MCP tool docstring** (`src/mcp_server.py`) — Added detailed documentation explaining the multi-line definition blocks restriction in `"single"` compile mode, with correct and incorrect usage examples showing when REPL display hook output is silently lost
+- **`Namespace.execute()` docstring** (`src/entrypoint.py`) — Added documentation about the `"single"` vs `"exec"` compile mode fallback behavior, explaining why callers must split multi-line definition blocks from their invocation into separate calls
+
 ## [0.4.1] — 2026-08-22
 
 ### Fixed
