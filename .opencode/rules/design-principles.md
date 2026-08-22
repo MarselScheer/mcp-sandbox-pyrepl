@@ -198,6 +198,114 @@ class OrderProcessor:
 #   result = processor.process(order)
 #   assert result.amount == order.total
 #   ↑ No patches. No mocks. Just a fake.
+
+### No `None` sentinels for dependencies
+
+A default value must be a **real, usable value** — not `None` used as a
+sentinel that triggers hidden creation.
+
+```python
+# ❌ BAD — None as a sentinel, hidden creation
+class OrderProcessor:
+    def __init__(self, client: PaymentClient | None = None) -> None:
+        if client is None:
+            client = HttpxPaymentClient()     # hidden coupling!
+        self._client = client
+
+# The signature suggests the parameter is optional, but the object
+# can't function without a real client. The fallback is hidden from
+# the caller and creates a real HTTP client — making tests impossible
+# without patching.
+
+# ❌ ALSO BAD — same pattern, any dependency
+def create_session_manager(
+    config: dict[str, Any],
+    docker_client: Any = None,               # sentinel
+) -> Any:
+    if docker_client is None:
+        docker_client = create_docker_client()  # hidden runtime crash
+    return SessionManager(docker=docker_client, config=config)
+
+# ✅ GOOD — required parameter, explicit contract
+class OrderProcessor:
+    def __init__(self, client: PaymentClient) -> None:
+        self._client = client        # always required, always visible
+```
+
+**Immutable defaults are fine.** `sys.stdin`, `datetime.now`, a frozen
+dataclass, a class reference (callable) — these are real, usable values
+that don't require `None` sentinels:
+
+```python
+# ✅ GOOD — immutable value, safe default
+class SessionServer:
+    def __init__(self, stdin: TextIO = sys.stdin) -> None:
+        self._stdin = stdin
+#   ↑ sys.stdin is a real, usable default. No sentinel, no fallback.
+#     Callers override for testing: SessionServer(stdin=StringIO())
+
+# ✅ GOOD — callable as factory, fresh instance per call
+class RPCDispatcher:
+    def __init__(
+        self,
+        make_timeout: Callable[[], TimeoutStrategy] = ThreadTimeoutStrategy,
+    ) -> None:
+        self._timeout = make_timeout()  # fresh instance each time
+```
+
+**Mutable / stateful service objects must be required parameters.**
+The caller must construct them explicitly:
+
+```python
+# ✅ GOOD — required, no default
+class RPCDispatcher:
+    def __init__(self, timeout: TimeoutStrategy) -> None:
+        self._timeout = timeout   # no default, caller provides it
+```
+
+**Docstring hint for required params.** When a service object is
+required, mention a reasonable standard default in the docstring so
+developers can quickly use the function without digging through the
+codebase:
+
+```python
+def create_mcp_app(
+    config: dict[str, Any],
+    docker_client: Any,
+) -> Any:
+    """Create the FastMCP application with all tools registered.
+
+    Args:
+        config: Dict with sandbox configuration.
+        docker_client: Docker client. Use ``create_docker_client()``
+                       to obtain one.
+
+    Returns:
+        A configured FastMCP instance.
+    """
+```
+
+**The rule of thumb:**
+
+| Default type | Verdict | Example |
+|---|---|---|
+| `None` as sentinel for fallback creation | **NEVER** | `client: Client | None = None` → `if None: create()` |
+| Immutable value | **FINE** | `sys.stdin`, `datetime.now`, `Config()`, `ThreadTimeoutStrategy` |
+| Callable / class reference | **FINE** | `make_timeout: Callable = ThreadTimeoutStrategy` |
+| Mutable / stateful service object | **REQUIRED** | `client: Client` — no default, caller builds it |
+
+**The exception:** `None` is acceptable as a default when the parameter
+genuinely means "no value", not as a trigger for fallback creation:
+
+```python
+# ✅ OK — None means "no value", not "create something"
+class OrderProcessor:
+    def __init__(self, callback: Callable[[], None] | None = None) -> None:
+        self._callback = callback    # None means "no callback", no fallback
+
+    def process(self, order: Order) -> None:
+        if self._callback:
+            self._callback()         # only called if provided
 ```
 
 ---
@@ -655,5 +763,7 @@ These don't need their own sections because the principles above kill them natur
 | **Circular dependencies** | If A needs B needs A, you can't construct either in a test. Testability pressure forces breaking the cycle. |
 | **Service locator** | A global registry that hands out dependencies is just DI with hidden coupling. The signature doesn't show the deps. Replaced by explicit DI. |
 | **`mock.patch` as standard practice** | If you need `mock.patch` in a behavior-driven test, the dependency wasn't injected. Fix the design, not the test. |
+| **`None` sentinel defaults** | A hidden fallback that creates a dependency defeats DI and forces patching. Required params or real defaults instead (see section 2). |
+| **Duplicated defaults across layers** | Copies of a config value silently diverge. One source of truth, read once by the factory (see section 8). |
 | **Anemic domain models** | Data bags + service classes split behavior from data. Rich models keep them together (see section 7). |
 | **Implementation-coupled tests** | Tests that mirror source code break on refactor and prove nothing. Test-first prevents them from existing (see section 1). |
