@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] — 2026-08-22
+
+### Fixed
+
+- **`RealDockerClient.container_rpc()` request/response mismatching** — Added unique `request_id` (via `_rpc_counter`) to each JSON-RPC call so that responses are correctly matched when multiple calls accumulate in the container's log stream. Previously, a response from one call could be consumed by the wrong caller, causing hangs or stale data. This specifically affected the `install_packages` tool when sessions had an existing log backlog.
+
+### Added
+
+- **`test_version_specific_install`** (`tests/integration/test_mcp_server.py`) — Integration test exercising package installation with an explicit version constraint (`markupsafe==2.1.0`), verifying the installed version matches the request
+- **`test_multi_package_install`** (`tests/integration/test_mcp_server.py`) — Integration test installing multiple packages in a single `install_packages` call (`six` and `pytz`), verifying all are importable afterward
+
+### Changed
+
+- **Package install integration tests through `MCPToolHandler`** — `tests/integration/test_packages.py` now routes all install/verify operations through `MCPToolHandler` instead of direct `docker exec` calls via the Docker SDK, testing the full MCP tool layer end-to-end
+- **Network isolation verification** — `test_install_single_package` (now `test_install_packages_connects_and_disconnects_network`) additionally verifies that network is actually disconnected after package installation, by attempting a socket connection to `example.com` and asserting a network error
+
 ## [0.4.0] — 2026-08-22
 
 ### Added
