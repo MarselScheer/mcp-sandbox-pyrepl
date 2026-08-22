@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any
 
 from main import (
+    DEFAULT_CONFIG,
+    _merge_config,
     load_config,
     sanitize_config_path,
     setup_signal_handlers,
@@ -68,3 +70,78 @@ class TestSetupSignalHandlers:
 
         assert signal.SIGINT in registered
         assert signal.SIGTERM in registered
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Config merging
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestMergeConfig:
+    """Merging user config into defaults."""
+
+    def test_merge_config_merges_images(self) -> None:
+        user_config: dict[str, Any] = {
+            "sandbox": {
+                "images": {
+                    "3.13": "sandbox-base:3.13",
+                },
+            }
+        }
+
+        result = _merge_config(user_config, dict(DEFAULT_CONFIG))
+
+        # Original images preserved, new one added
+        sandbox = result["sandbox"]
+        assert sandbox["images"]["3.12"] == "sandbox-base:3.12"
+        assert sandbox["images"]["3.13"] == "sandbox-base:3.13"
+
+    def test_merge_config_merges_defaults(self) -> None:
+        user_config: dict[str, Any] = {
+            "sandbox": {
+                "defaults": {
+                    "timeout": 60,
+                },
+            }
+        }
+
+        result = _merge_config(user_config, dict(DEFAULT_CONFIG))
+
+        sandbox = result["sandbox"]
+        assert sandbox["defaults"]["timeout"] == 60
+        # Other defaults preserved
+        assert sandbox["defaults"]["python_version"] == "3.12"
+
+    def test_merge_config_overrides_data_dir(self) -> None:
+        user_config: dict[str, Any] = {
+            "sandbox": {
+                "data_dir": "/custom/data/path",
+            }
+        }
+
+        result = _merge_config(user_config, dict(DEFAULT_CONFIG))
+
+        assert result["sandbox"]["data_dir"] == "/custom/data/path"
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Config loading error handling
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestLoadConfigErrors:
+    """Error handling in configuration loading."""
+
+    def test_load_config_malformed_yaml_falls_back_to_defaults(
+        self, tmp_path: Path
+    ) -> None:
+        config_path = tmp_path / "bad_config.yaml"
+        config_path.write_text("sandbox:\n  images:\n    invalid_yaml: [unclosed")
+
+        config = load_config(str(config_path))
+
+        assert "sandbox" in config
+        assert "3.12" in config["sandbox"]["images"]
+
+
+
