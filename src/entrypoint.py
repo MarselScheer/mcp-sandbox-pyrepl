@@ -68,6 +68,16 @@ class Namespace:
 
         Captures stdout, stderr, display output, and errors.
         Uses 'single' compile mode for proper REPL display hook semantics.
+
+        **Restriction:** Multi-line definition blocks (`def`, `class`, `async def`)
+        must be defined in a **separate call** from the code that invokes them.
+        The `compile()` function with `'single'` mode supports at most one
+        compound statement per call. Combining a definition and its invocation
+        in a single call causes a fallback to `'exec'` mode, which silently
+        loses REPL display hook output for evaluated expressions.
+
+        Callers should split their code into two calls: one to define the
+        function(s), then one to execute the invoking code.
         """
         stdout_buf = StringIO()
         stderr_buf = StringIO()

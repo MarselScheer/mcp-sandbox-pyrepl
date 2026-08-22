@@ -67,6 +67,22 @@ class MCPToolHandler:
     ) -> dict[str, Any]:
         """Execute Python code in a session.
 
+        **Important:** Multi-line definition blocks (`def`, `class`, `async def`)
+        must be defined in a **separate call** from the code that invokes them.
+        The underlying `compile()` with `'single'` mode supports at most one
+        compound statement per call. Combining a definition and its invocation
+        in a single call will silently lose REPL display hook output for
+        evaluated expressions.
+
+        Correct usage:
+            execute_python(session_id, code="def double(x):\\n    return x * 2")
+            result = execute_python(session_id, code="double(21)")
+            # result.display == ["42"]
+
+        Incorrect (display output lost):
+            result = execute_python(session_id, code="def double(x):\\n    return x * 2\\ndouble(21)")
+            # result.display == []  — display hook not triggered
+
         Args:
             session_id: Target session identifier.
             code: Python code to execute.
