@@ -88,9 +88,7 @@ class RealDockerClient:
         """Get a container by ID."""
         return self._client.containers.get(container_id)
 
-    def container_remove(
-        self, container_id: str, force: bool = False
-    ) -> None:
+    def container_remove(self, container_id: str, force: bool = False) -> None:
         """Remove a container."""
         container = self.container_get(container_id)
         container.remove(force=force)
@@ -108,9 +106,7 @@ class RealDockerClient:
         it in a ``TextIOWrapper`` for text I/O.
         """
         container = self.container_get(container_id)
-        sock = container.attach_socket(
-            params={"stdin": 1, "stream": 1, "logs": 1}
-        )
+        sock = container.attach_socket(params={"stdin": 1, "stream": 1, "logs": 1})
         if isinstance(sock, socket.socket):
             return io.TextIOWrapper(
                 io.BufferedWriter(sock.makefile("wb")),
@@ -123,9 +119,7 @@ class RealDockerClient:
         msg = f"Unexpected stdin type: {type(sock)}"
         raise TypeError(msg)
 
-    def container_exec_run(
-        self, container_id: str, cmd: list[str]
-    ) -> dict[str, Any]:
+    def container_exec_run(self, container_id: str, cmd: list[str]) -> dict[str, Any]:
         """Run a command inside the container and return the result."""
         container = self._client.containers.get(container_id)
         result = container.exec_run(cmd)
@@ -139,16 +133,12 @@ class RealDockerClient:
             "output": output,
         }
 
-    def network_disconnect(
-        self, container_id: str, network: str = "bridge"
-    ) -> None:
+    def network_disconnect(self, container_id: str, network: str = "bridge") -> None:
         """Disconnect a container from a network."""
         net = self._client.networks.get(network)
         net.disconnect(container_id)
 
-    def network_connect(
-        self, container_id: str, network: str = "bridge"
-    ) -> None:
+    def network_connect(self, container_id: str, network: str = "bridge") -> None:
         """Connect a container to a network.
 
         If the container is already connected to the network, this is a no-op
@@ -226,9 +216,7 @@ class RealDockerClient:
         total_wait = 0.0
         timeout = 10.0
         while total_wait < timeout:
-            logs = container.logs(stdout=True, stderr=False, tail=5).decode(
-                "utf-8"
-            )
+            logs = container.logs(stdout=True, stderr=False, tail=5).decode("utf-8")
             for line in reversed(logs.strip().split("\n")):
                 line = line.strip()
                 if not line:
@@ -236,9 +224,11 @@ class RealDockerClient:
                 try:
                     elapsed = time.perf_counter() - t0
                     import logging
+
                     logging.getLogger(__name__).info(
                         "TIMING container_rpc (%s method=%s): %.3fs",
-                        container_id[:12], request.get("method", "?"),
+                        container_id[:12],
+                        request.get("method", "?"),
                         elapsed,
                     )
                     return json.loads(line)
@@ -249,5 +239,7 @@ class RealDockerClient:
             backoff = min(backoff * 1.5, max_backoff)
 
         elapsed = time.perf_counter() - t0
-        msg = f"No JSON-RPC response found in container logs after {elapsed:.3f}s: {logs}"
+        msg = (
+            f"No JSON-RPC response found in container logs after {elapsed:.3f}s: {logs}"
+        )
         raise ConnectionError(msg)

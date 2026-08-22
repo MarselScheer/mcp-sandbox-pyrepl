@@ -7,7 +7,6 @@ between independent sessions.
 from __future__ import annotations
 
 import docker
-import pytest
 
 from session_manager import SessionManager
 
@@ -18,7 +17,6 @@ def _decode_output(result: object) -> str:
     return output.decode("utf-8") if isinstance(output, bytes) else output
 
 
-@pytest.mark.integration
 class TestPackageInstallation:
     """Package installation inside Docker containers.
 
@@ -44,8 +42,13 @@ class TestPackageInstallation:
         # read-only rootfs.
         install_result = container.exec_run(
             [
-                "uv", "pip", "install", "--no-cache", "pytz",
-                "--python", "/session/venv/bin/python",
+                "uv",
+                "pip",
+                "install",
+                "--no-cache",
+                "pytz",
+                "--python",
+                "/session/venv/bin/python",
             ],
         )
         install_output = _decode_output(install_result)
@@ -60,7 +63,8 @@ class TestPackageInstallation:
         }
         verify_result = container.exec_run(
             [
-                "python3", "-c",
+                "python3",
+                "-c",
                 "import pytz; tz = pytz.timezone('UTC'); print(tz.zone)",
             ],
             environment=venv_env,
@@ -100,8 +104,13 @@ class TestPackageInstallation:
         # read-only rootfs.
         install_result = container_a.exec_run(
             [
-                "uv", "pip", "install", "--no-cache", "pytz",
-                "--python", "/session/venv/bin/python",
+                "uv",
+                "pip",
+                "install",
+                "--no-cache",
+                "pytz",
+                "--python",
+                "/session/venv/bin/python",
             ],
         )
         install_output = _decode_output(install_result)

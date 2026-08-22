@@ -170,9 +170,7 @@ class MCPToolHandler:
         """
         return {"versions": dict(self._image_registry)}
 
-    def write_file(
-        self, session_id: str, path: str, content: str
-    ) -> dict[str, Any]:
+    def write_file(self, session_id: str, path: str, content: str) -> dict[str, Any]:
         """Write content to a file in the session's data directory.
 
         Delegates to SessionManager.write_file() which uses docker exec
@@ -189,9 +187,7 @@ class MCPToolHandler:
         """
         return self._sm.write_file(session_id, path, content)
 
-    def read_file(
-        self, session_id: str, path: str
-    ) -> dict[str, Any]:
+    def read_file(self, session_id: str, path: str) -> dict[str, Any]:
         """Read a file from the session's data directory.
 
         Delegates to SessionManager.read_file() which uses docker exec
@@ -206,9 +202,7 @@ class MCPToolHandler:
         """
         return self._sm.read_file(session_id, path)
 
-    def list_files(
-        self, session_id: str, path: str = ""
-    ) -> dict[str, Any]:
+    def list_files(self, session_id: str, path: str = "") -> dict[str, Any]:
         """List files in the session's data directory.
 
         Delegates to SessionManager.list_files() which uses docker exec

@@ -41,25 +41,19 @@ class DockerClient(Protocol):
         network: str | None = ...,
         detach: bool = ...,
         tmpfs: dict[str, str] | None = ...,
-    ) -> Any:
-        ...
+    ) -> Any: ...
 
-    def container_get(self, container_id: str) -> Any:
-        ...
+    def container_get(self, container_id: str) -> Any: ...
 
-    def container_remove(self, container_id: str, force: bool = ...) -> None:
-        ...
+    def container_remove(self, container_id: str, force: bool = ...) -> None: ...
 
-    def container_stop(self, container_id: str) -> None:
-        ...
+    def container_stop(self, container_id: str) -> None: ...
 
-    def container_stdin(self, container_id: str) -> Any:
-        ...
+    def container_stdin(self, container_id: str) -> Any: ...
 
     def container_exec_run(
         self, container_id: str, cmd: list[str]
-    ) -> dict[str, Any]:
-        ...
+    ) -> dict[str, Any]: ...
 
     def container_rpc(
         self, container_id: str, request: dict[str, Any]
@@ -72,15 +66,9 @@ class DockerClient(Protocol):
         """
         ...
 
-    def network_disconnect(
-        self, container_id: str, network: str = ...
-    ) -> None:
-        ...
+    def network_disconnect(self, container_id: str, network: str = ...) -> None: ...
 
-    def network_connect(
-        self, container_id: str, network: str = ...
-    ) -> None:
-        ...
+    def network_connect(self, container_id: str, network: str = ...) -> None: ...
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -98,13 +86,15 @@ class SessionManagerConfig:
     data_dir: Path = field(
         default_factory=lambda: Path.home() / ".mcp-sandbox-pyrepl" / "data"
     )
-    image_registry: dict[str, str] = field(default_factory=lambda: {
-        "3.9": "sandbox-base:3.9",
-        "3.10": "sandbox-base:3.10",
-        "3.11": "sandbox-base:3.11",
-        "3.12": "sandbox-base:3.12",
-        "3.13": "sandbox-base:3.13",
-    })
+    image_registry: dict[str, str] = field(
+        default_factory=lambda: {
+            "3.9": "sandbox-base:3.9",
+            "3.10": "sandbox-base:3.10",
+            "3.11": "sandbox-base:3.11",
+            "3.12": "sandbox-base:3.12",
+            "3.13": "sandbox-base:3.13",
+        }
+    )
     default_python_version: str = "3.12"
     network_name: str = "bridge"
     container_user: str = "1000"
@@ -225,13 +215,10 @@ class SessionManager:
     def list_sessions(self) -> dict[str, dict[str, Any]]:
         """Return all active sessions with their metadata."""
         return {
-            sid: self._metadata_to_dict(meta)
-            for sid, meta in self._sessions.items()
+            sid: self._metadata_to_dict(meta) for sid, meta in self._sessions.items()
         }
 
-    def get_session(
-        self, session_id: str
-    ) -> dict[str, Any] | None:
+    def get_session(self, session_id: str) -> dict[str, Any] | None:
         """Return metadata for a specific session, or None if not found."""
         metadata = self._sessions.get(session_id)
         if metadata is None:
@@ -245,9 +232,7 @@ class SessionManager:
             msg = f"Session not found: {session_id}"
             raise ValueError(msg)
 
-        self._docker.network_connect(
-            metadata.container_id, self._config.network_name
-        )
+        self._docker.network_connect(metadata.container_id, self._config.network_name)
 
     def network_disconnect(self, session_id: str) -> None:
         """Disconnect the container's network (for code execution)."""
@@ -310,9 +295,7 @@ class SessionManager:
         )
         self._sessions[session_id] = new_meta
 
-    def send_rpc(
-        self, session_id: str, request: dict[str, Any]
-    ) -> dict[str, Any]:
+    def send_rpc(self, session_id: str, request: dict[str, Any]) -> dict[str, Any]:
         """Send a JSON-RPC request to the session container and read the response.
 
         Delegates to the Docker client's container_rpc which handles the
@@ -341,9 +324,7 @@ class SessionManager:
 
     # ── File operations via docker exec ────────────────────────────
 
-    def write_file(
-        self, session_id: str, path: str, content: str
-    ) -> dict[str, Any]:
+    def write_file(self, session_id: str, path: str, content: str) -> dict[str, Any]:
         """Write content to a file in the session's /data directory.
 
         Uses docker exec to interact with the container's /data volume,
@@ -388,9 +369,7 @@ class SessionManager:
             }
         return {"success": True}
 
-    def read_file(
-        self, session_id: str, path: str
-    ) -> dict[str, Any]:
+    def read_file(self, session_id: str, path: str) -> dict[str, Any]:
         """Read a file from the session's /data directory.
 
         Uses docker exec to interact with the container's /data volume.
@@ -441,9 +420,7 @@ class SessionManager:
         except (json.JSONDecodeError, KeyError):
             return {"error": "Failed to parse file content"}
 
-    def list_files(
-        self, session_id: str, path: str = ""
-    ) -> dict[str, Any]:
+    def list_files(self, session_id: str, path: str = "") -> dict[str, Any]:
         """List files in the session's /data directory.
 
         Uses docker exec to interact with the container's /data volume.

@@ -15,10 +15,8 @@ from __future__ import annotations
 import time
 
 import docker
-import pytest
 
-from session_manager import SessionManager
-from tests.rpc_helpers import rpc_call
+from tests.integration.rpc_helpers import rpc_call
 
 
 def _decode_output(result: object) -> str:
@@ -32,7 +30,6 @@ def _decode_output(result: object) -> str:
 # ──────────────────────────────────────────────────────────────────────
 
 
-@pytest.mark.integration
 class TestCodeExecution:
     """Code execution inside Docker containers.
 

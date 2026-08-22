@@ -19,7 +19,6 @@ from session_manager import SessionManager
 class TestSessionCreate:
     """Creating sessions with real Docker containers."""
 
-    @pytest.mark.integration
     def test_create_session_returns_session_id(
         self, session_manager: SessionManager
     ) -> None:
@@ -29,7 +28,6 @@ class TestSessionCreate:
         assert session_id.startswith("sess_")
         assert len(session_id) > 5
 
-    @pytest.mark.integration
     def test_create_session_starts_container(
         self,
         session_manager: SessionManager,
@@ -48,7 +46,6 @@ class TestSessionCreate:
         # Cleanup
         session_manager.end_session(session_id)
 
-    @pytest.mark.integration
     def test_create_session_with_custom_image(
         self,
         session_manager: SessionManager,
@@ -71,14 +68,12 @@ class TestSessionCreate:
 class TestSessionList:
     """Listing and querying sessions."""
 
-    @pytest.mark.integration
     def test_list_sessions_empty_initially(
         self, session_manager: SessionManager
     ) -> None:
         """No sessions initially."""
         assert session_manager.list_sessions() == {}
 
-    @pytest.mark.integration
     def test_list_sessions_after_creation(
         self, session_manager: SessionManager
     ) -> None:
@@ -94,10 +89,7 @@ class TestSessionList:
         # Cleanup
         session_manager.end_session(session_id)
 
-    @pytest.mark.integration
-    def test_list_sessions_multiple(
-        self, session_manager: SessionManager
-    ) -> None:
+    def test_list_sessions_multiple(self, session_manager: SessionManager) -> None:
         """Multiple sessions appear in listing."""
         sid1 = session_manager.create_session(python_version="3.12")
         sid2 = session_manager.create_session(python_version="3.12")
@@ -110,7 +102,6 @@ class TestSessionList:
         session_manager.end_session(sid1)
         session_manager.end_session(sid2)
 
-    @pytest.mark.integration
     def test_get_session_returns_metadata(
         self, session_manager: SessionManager
     ) -> None:
@@ -129,7 +120,6 @@ class TestSessionList:
         # Cleanup
         session_manager.end_session(session_id)
 
-    @pytest.mark.integration
     def test_get_session_nonexistent_returns_none(
         self, session_manager: SessionManager
     ) -> None:
@@ -145,7 +135,6 @@ class TestSessionList:
 class TestSessionEnd:
     """Ending sessions."""
 
-    @pytest.mark.integration
     def test_end_session_stops_container(
         self,
         session_manager: SessionManager,
@@ -168,7 +157,6 @@ class TestSessionEnd:
             # in some Docker versions; check it's not running
             assert container.status != "running"
 
-    @pytest.mark.integration
     def test_end_session_removes_from_registry(
         self, session_manager: SessionManager
     ) -> None:
@@ -180,10 +168,7 @@ class TestSessionEnd:
         assert session_manager.get_session(session_id) is None
         assert session_id not in session_manager.list_sessions()
 
-    @pytest.mark.integration
-    def test_end_session_is_idempotent(
-        self, session_manager: SessionManager
-    ) -> None:
+    def test_end_session_is_idempotent(self, session_manager: SessionManager) -> None:
         """Ending a session twice succeeds both times."""
         session_id = session_manager.create_session(python_version="3.12")
 

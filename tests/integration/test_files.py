@@ -10,9 +10,6 @@ from __future__ import annotations
 from typing import Any
 
 import docker
-import pytest
-
-from session_manager import SessionManager
 
 
 def _exec(container_id: str, code: str) -> dict[str, Any]:
@@ -29,7 +26,6 @@ def _exec(container_id: str, code: str) -> dict[str, Any]:
     return {"exit_code": result.exit_code, "output": output}
 
 
-@pytest.mark.integration
 class TestFileIO:
     """File I/O in the container's /data named volume.
 
@@ -48,9 +44,7 @@ class TestFileIO:
         container_id = class_container["container_id"]
 
         # Write a file via the SessionManager's write_file (docker exec)
-        result = manager.write_file(
-            session_id, "hello.txt", "Hello from the host!"
-        )
+        result = manager.write_file(session_id, "hello.txt", "Hello from the host!")
         assert result.get("success"), f"write_file failed: {result}"
 
         # Verify the container can read it via docker exec
