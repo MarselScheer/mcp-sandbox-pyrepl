@@ -88,6 +88,22 @@ class TestSetupSignalHandlers:
         assert signal.SIGINT in registered
         assert signal.SIGTERM in registered
 
+    def test_default_shutdown_handler_exits(self) -> None:
+        """The default handler calls sys.exit(0) on SIGINT/SIGTERM."""
+        import pytest
+
+        registered: dict[int, Any] = {}
+
+        def fake_register(signum: int, handler: Any) -> None:
+            registered[signum] = handler
+
+        setup_signal_handlers(register=fake_register)
+
+        with pytest.raises(SystemExit) as excinfo:
+            registered[signal.SIGINT](signal.SIGINT, None)
+
+        assert excinfo.value.code == 0
+
 
 # ──────────────────────────────────────────────────────────────────────
 # Config merging

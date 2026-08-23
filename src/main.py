@@ -248,7 +248,7 @@ def setup_signal_handlers(
 # ──────────────────────────────────────────────────────────────────────
 
 
-def main() -> None:
+def main() -> None:  # pragma: no cover
     """Main entry point for the MCP Sandbox PyREPL server."""
     import argparse
 
@@ -294,5 +294,5 @@ def main() -> None:
     mcp_app.run()
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     main()
