@@ -49,19 +49,18 @@ def sanitize_config_path(config_path: str) -> str:
     return str(project_root / config_path)
 
 
-def load_config(config_path: str | None = None) -> dict[str, Any]:
+def load_config(config_path: str) -> dict[str, Any]:
     """Load configuration from YAML file, falling back to defaults.
 
     Args:
-        config_path: Optional path to config.yaml. If None or file doesn't
+        config_path: Path to config.yaml. The caller is responsible for
+                     resolving relative paths before calling (see
+                     :func:`sanitize_config_path`). If the file doesn't
                      exist, returns default configuration.
 
     Returns:
         Dict with sandbox configuration.
     """
-    if config_path is None:
-        config_path = sanitize_config_path("config.yaml")
-
     path = Path(config_path)
     if not path.exists():
         logger.info("Config file not found at %s, using defaults", config_path)
@@ -273,7 +272,8 @@ def main() -> None:
     )
 
     # Load config
-    config = load_config(args.config)
+    config_path = args.config if args.config else sanitize_config_path("config.yaml")
+    config = load_config(config_path)
     logger.info("Configuration loaded")
 
     # Setup signal handlers

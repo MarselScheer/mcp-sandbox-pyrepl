@@ -127,10 +127,10 @@ class SessionManager:
     def __init__(
         self,
         docker: DockerClient,
-        config: SessionManagerConfig | None = None,
+        config: SessionManagerConfig = SessionManagerConfig(),
     ) -> None:
         self._docker = docker
-        self._config = config or SessionManagerConfig()
+        self._config = config
         self._sessions: dict[str, SessionMetadata] = {}
 
     def create_session(
