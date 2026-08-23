@@ -125,7 +125,9 @@ class SessionManager:
     def __init__(
         self,
         docker: DockerClient,
-        config: SessionManagerConfig = SessionManagerConfig(),
+        # SessionManagerConfig is a frozen dataclass — the default is an
+        # immutable, safe value (not a mutable sentinel for fallback creation).
+        config: SessionManagerConfig = SessionManagerConfig(),  # noqa: B008
     ) -> None:
         self._docker = docker
         self._config = config

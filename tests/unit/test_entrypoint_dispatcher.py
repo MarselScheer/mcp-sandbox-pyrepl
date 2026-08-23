@@ -6,8 +6,6 @@ PackageInstaller). We use fakes to keep the arrange phase at 1-3 lines.
 
 from __future__ import annotations
 
-from .conftest import FakePackageInstaller
-
 from entrypoint import (
     ExecResult,
     Namespace,
@@ -16,6 +14,8 @@ from entrypoint import (
     RPCDispatcherConfig,
     RPCRequest,
 )
+
+from .conftest import FakePackageInstaller
 
 # ──────────────────────────────────────────────────────────────────────
 # Fakes

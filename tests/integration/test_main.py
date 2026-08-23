@@ -42,7 +42,10 @@ class TestCreateSessionManager:
 
         assert sm is not None
         session_id = sm.create_session(python_version="3.12")
-        assert session_id.startswith("sess_")
+        try:
+            assert session_id.startswith("sess_")
+        finally:
+            sm.end_session(session_id)
 
     def test_create_session_manager_with_defaults(self, docker_available: bool) -> None:
         if not docker_available:

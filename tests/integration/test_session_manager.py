@@ -186,7 +186,10 @@ class TestSessionManagerCreate:
         )
 
         session_id = sm.create_session(python_version="3.12")
-        assert session_id.startswith("sess_")
+        try:
+            assert session_id.startswith("sess_")
+        finally:
+            sm.end_session(session_id)
 
     def test_create_session_adds_to_registry(
         self, session_manager: SessionManager
