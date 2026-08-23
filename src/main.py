@@ -5,6 +5,7 @@ using the factory pattern. No business logic lives here — just composition.
 """
 
 from __future__ import annotations
+from session_manager import DockerClient
 
 import logging
 import signal
@@ -114,7 +115,7 @@ def _merge_config(
 # ──────────────────────────────────────────────────────────────────────
 
 
-def create_docker_client() -> Any:
+def create_docker_client() -> DockerClient:
     """Create a Docker client using the docker-py library.
 
     Returns a ``RealDockerClient`` adapter that satisfies the
