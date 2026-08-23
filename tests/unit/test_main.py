@@ -51,10 +51,27 @@ class TestLoadConfig:
         assert config["sandbox"]["images"]["3.12"] == "sandbox-base:3.12"
         assert config["sandbox"]["defaults"]["timeout"] == 30
 
+    def test_load_config_returns_defaults_when_yaml_returns_none(
+        self, tmp_path: Path
+    ) -> None:
+        empty_file = tmp_path / "empty.yaml"
+        empty_file.write_text("")
+        config = load_config(str(empty_file))
+        assert config == dict(DEFAULT_CONFIG)
+
+        null_file = tmp_path / "null.yaml"
+        null_file.write_text("~\n")
+        config = load_config(str(null_file))
+        assert config == dict(DEFAULT_CONFIG)
+
     def test_sanitize_config_path_resolves_relative(self) -> None:
         result = sanitize_config_path("config.yaml")
         assert result.endswith("config.yaml")
         assert isinstance(result, str)
+
+    def test_sanitize_config_path_preserves_absolute(self) -> None:
+        result = sanitize_config_path("/etc/config.yaml")
+        assert result == "/etc/config.yaml"
 
 
 class TestSetupSignalHandlers:
