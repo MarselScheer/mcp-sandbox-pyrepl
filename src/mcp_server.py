@@ -31,14 +31,16 @@ class MCPToolHandler:
 
     def create_session(
         self,
-        python_version: str = "3.12",
+        python_version: str | None = None,
         image: str | None = None,
     ) -> dict[str, Any]:
         """Create a new sandboxed Python REPL session.
 
         Args:
             python_version: Python version to use (e.g., "3.12").
-            image: Optional custom Docker image override.
+                          Defaults to the SessionManager's configured default.
+            image: Optional custom Docker image override (takes precedence
+                   over python_version).
 
         Returns:
             Dict with session_id and metadata.
@@ -46,8 +48,9 @@ class MCPToolHandler:
         kwargs: dict[str, Any] = {}
         if image is not None:
             kwargs["image"] = image
-        else:
+        elif python_version is not None:
             kwargs["python_version"] = python_version
+        # else: pass neither — SessionManager uses its config default
 
         session_id = self._sm.create_session(**kwargs)
         info = self._sm.get_session(session_id)
