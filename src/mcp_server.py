@@ -24,27 +24,23 @@ class MCPToolHandler:
     def __init__(
         self,
         session_manager: Any,
-        image_registry: dict[str, str] | None = None,
+        image_registry: dict[str, str],
     ) -> None:
         self._sm = session_manager
-        self._image_registry = image_registry or {
-            "3.9": "sandbox-base:3.9",
-            "3.10": "sandbox-base:3.10",
-            "3.11": "sandbox-base:3.11",
-            "3.12": "sandbox-base:3.12",
-            "3.13": "sandbox-base:3.13",
-        }
+        self._image_registry = image_registry
 
     def create_session(
         self,
-        python_version: str = "3.12",
+        python_version: str | None = None,
         image: str | None = None,
     ) -> dict[str, Any]:
         """Create a new sandboxed Python REPL session.
 
         Args:
             python_version: Python version to use (e.g., "3.12").
-            image: Optional custom Docker image override.
+                          Defaults to the SessionManager's configured default.
+            image: Optional custom Docker image override (takes precedence
+                   over python_version).
 
         Returns:
             Dict with session_id and metadata.
@@ -52,8 +48,9 @@ class MCPToolHandler:
         kwargs: dict[str, Any] = {}
         if image is not None:
             kwargs["image"] = image
-        else:
+        elif python_version is not None:
             kwargs["python_version"] = python_version
+        # else: pass neither — SessionManager uses its config default
 
         session_id = self._sm.create_session(**kwargs)
         info = self._sm.get_session(session_id)
@@ -80,7 +77,9 @@ class MCPToolHandler:
             # result.display == ["42"]
 
         Incorrect (display output lost):
-            result = execute_python(session_id, code="def double(x):\\n    return x * 2\\ndouble(21)")
+            result = execute_python(
+                session_id, code="def double(x):\\n    return x * 2\\ndouble(21)"
+            )
             # result.display == []  — display hook not triggered
 
         Args:
@@ -241,14 +240,14 @@ class MCPToolHandler:
 
 def create_mcp_app(
     session_manager: Any,
-    image_registry: dict[str, str] | None = None,
+    image_registry: dict[str, str],
     server_name: str = "mcp-sandbox-pyrepl",
 ) -> FastMCP:
     """Create and configure the FastMCP application.
 
     Args:
         session_manager: The SessionManager instance.
-        image_registry: Optional image registry mapping.
+        image_registry: Image registry mapping.
         server_name: MCP server name.
 
     Returns:

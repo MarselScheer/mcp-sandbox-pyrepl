@@ -32,8 +32,6 @@ class DockerClient(Protocol):
     def containers_create(
         self,
         image: str,
-        command: str | None = ...,
-        name: str | None = ...,
         user: str | None = ...,
         read_only: bool = ...,
         cap_drop: list[str] | None = ...,
@@ -127,10 +125,12 @@ class SessionManager:
     def __init__(
         self,
         docker: DockerClient,
-        config: SessionManagerConfig | None = None,
+        # SessionManagerConfig is a frozen dataclass — the default is an
+        # immutable, safe value (not a mutable sentinel for fallback creation).
+        config: SessionManagerConfig = SessionManagerConfig(),  # noqa: B008
     ) -> None:
         self._docker = docker
-        self._config = config or SessionManagerConfig()
+        self._config = config
         self._sessions: dict[str, SessionMetadata] = {}
 
     def create_session(
@@ -157,33 +157,7 @@ class SessionManager:
 
         session_id = self._generate_session_id()
 
-        volumes = [
-            {
-                # Use a named volume for /data so Docker manages storage
-                # instead of requiring a host-side bind mount. This avoids
-                # permission errors when the MCP server runs inside a
-                # Docker container (Docker-in-Docker scenario).
-                "host_path": "",
-                "container_path": "/data",
-                "mode": "rw",
-            },
-            {
-                "host_path": "",
-                "container_path": "/session",
-                "mode": "rw",
-            },
-        ]
-
-        container = self._docker.containers_create(
-            image=resolved_image,
-            user=self._config.container_user,
-            read_only=True,
-            cap_drop=["ALL"],
-            volumes=volumes,
-            tmpfs={"/tmp": "rw,size=64m"},
-            network=self._config.network_name,
-            detach=True,
-        )
+        container = self._create_container(resolved_image)
 
         metadata = SessionMetadata(
             session_id=session_id,
@@ -261,29 +235,7 @@ class SessionManager:
             self._docker.container_remove(metadata.container_id, force=True)
 
         # Create a new container for the same session
-        volumes = [
-            {
-                "host_path": "",
-                "container_path": "/data",
-                "mode": "rw",
-            },
-            {
-                "host_path": "",
-                "container_path": "/session",
-                "mode": "rw",
-            },
-        ]
-
-        container = self._docker.containers_create(
-            image=metadata.image,
-            user=self._config.container_user,
-            read_only=True,
-            cap_drop=["ALL"],
-            volumes=volumes,
-            tmpfs={"/tmp": "rw,size=64m"},
-            network=self._config.network_name,
-            detach=True,
-        )
+        container = self._create_container(metadata.image)
 
         new_meta = SessionMetadata(
             session_id=session_id,
@@ -470,6 +422,39 @@ class SessionManager:
             return {"error": "Failed to parse file listing"}
 
     # ── Private helpers ──────────────────────────────────────────────
+
+    def _create_container(self, image: str) -> Any:
+        """Create a sandbox container with the standard configuration.
+
+        Encapsulates the common container creation parameters shared
+        across ``create_session`` and ``restart_session``.
+        """
+        volumes = [
+            {
+                # Use a named volume for /data so Docker manages storage
+                # instead of requiring a host-side bind mount. This avoids
+                # permission errors when the MCP server runs inside a
+                # Docker container (Docker-in-Docker scenario).
+                "host_path": "",
+                "container_path": "/data",
+                "mode": "rw",
+            },
+            {
+                "host_path": "",
+                "container_path": "/session",
+                "mode": "rw",
+            },
+        ]
+        return self._docker.containers_create(
+            image=image,
+            user=self._config.container_user,
+            read_only=True,
+            cap_drop=["ALL"],
+            volumes=volumes,
+            tmpfs={"/tmp": "rw,size=64m"},
+            network=self._config.network_name,
+            detach=True,
+        )
 
     def _resolve_image(self, python_version: str) -> str:
         image = self._config.image_registry.get(python_version)

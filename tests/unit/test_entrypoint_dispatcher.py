@@ -9,10 +9,13 @@ from __future__ import annotations
 from entrypoint import (
     ExecResult,
     Namespace,
+    NoOpTimeoutStrategy,
     RPCDispatcher,
     RPCDispatcherConfig,
     RPCRequest,
 )
+
+from .conftest import FakePackageInstaller
 
 # ──────────────────────────────────────────────────────────────────────
 # Fakes
@@ -40,20 +43,6 @@ class FakeTimeoutStrategy:
         return namespace.exec(code)
 
 
-class FakePackageInstaller:
-    """A fake package installer for testing — no subprocess calls."""
-
-    def __init__(self, result: ExecResult | None = None) -> None:
-        self._result = result
-        self.last_packages: list[dict[str, str]] = []
-
-    def install(self, packages: list[dict[str, str]]) -> ExecResult:
-        self.last_packages = packages
-        if self._result is not None:
-            return self._result
-        return ExecResult(stdout=f"Installed {len(packages)} package(s)")
-
-
 # ──────────────────────────────────────────────────────────────────────
 # Tests
 # ──────────────────────────────────────────────────────────────────────
@@ -67,6 +56,8 @@ class TestRPCDispatcherRouting:
         dispatcher = RPCDispatcher(
             namespace=Namespace(),
             timeout_strategy=timeout,
+            installer=FakePackageInstaller(),
+            config=RPCDispatcherConfig(),
         )
 
         request = RPCRequest(id=1, method="exec", params={"code": "2 + 2"})
@@ -78,7 +69,12 @@ class TestRPCDispatcherRouting:
 
     def test_reset_method(self) -> None:
         namespace = Namespace()
-        dispatcher = RPCDispatcher(namespace=namespace)
+        dispatcher = RPCDispatcher(
+            namespace=namespace,
+            timeout_strategy=NoOpTimeoutStrategy(),
+            installer=FakePackageInstaller(),
+            config=RPCDispatcherConfig(),
+        )
 
         namespace.exec("x = 42")
         request = RPCRequest(id=2, method="reset", params={})
@@ -90,28 +86,22 @@ class TestRPCDispatcherRouting:
         result = namespace.exec("print(x)")
         assert "NameError" in result.error
 
-    def test_ping_method(self) -> None:
-        dispatcher = RPCDispatcher()
-
+    def test_ping_method(self, stub_dispatcher: RPCDispatcher) -> None:
         request = RPCRequest(id=3, method="ping", params={})
-        response = dispatcher.handle(request)
+        response = stub_dispatcher.handle(request)
 
         assert response["result"]["ok"] is True
 
-    def test_shutdown_method(self) -> None:
-        dispatcher = RPCDispatcher()
-
+    def test_shutdown_method(self, stub_dispatcher: RPCDispatcher) -> None:
         request = RPCRequest(id=4, method="shutdown", params={})
-        response = dispatcher.handle(request)
+        response = stub_dispatcher.handle(request)
 
         assert response["result"]["ok"] is True
-        assert dispatcher.shutdown_requested is True
+        assert stub_dispatcher.shutdown_requested is True
 
-    def test_unknown_method_returns_error(self) -> None:
-        dispatcher = RPCDispatcher()
-
+    def test_unknown_method_returns_error(self, stub_dispatcher: RPCDispatcher) -> None:
         request = RPCRequest(id=5, method="nonexistent", params={})
-        response = dispatcher.handle(request)
+        response = stub_dispatcher.handle(request)
 
         assert "error" in response
         assert response["error"]["code"] == -32601
@@ -119,7 +109,12 @@ class TestRPCDispatcherRouting:
 
     def test_install_method_routes_to_installer(self) -> None:
         installer = FakePackageInstaller()
-        dispatcher = RPCDispatcher(installer=installer)
+        dispatcher = RPCDispatcher(
+            namespace=Namespace(),
+            timeout_strategy=NoOpTimeoutStrategy(),
+            installer=installer,
+            config=RPCDispatcherConfig(),
+        )
 
         request = RPCRequest(
             id=6,
@@ -140,6 +135,8 @@ class TestRPCDispatcherExec:
         dispatcher = RPCDispatcher(
             namespace=Namespace(),
             timeout_strategy=timeout,
+            installer=FakePackageInstaller(),
+            config=RPCDispatcherConfig(),
         )
 
         request = RPCRequest(
@@ -157,6 +154,7 @@ class TestRPCDispatcherExec:
         dispatcher = RPCDispatcher(
             namespace=Namespace(),
             timeout_strategy=timeout,
+            installer=FakePackageInstaller(),
             config=config,
         )
 
@@ -173,7 +171,12 @@ class TestRPCDispatcherExec:
         timeout = FakeTimeoutStrategy(
             result=ExecResult(error="Timed out", session_corrupted=True)
         )
-        dispatcher = RPCDispatcher(timeout_strategy=timeout)
+        dispatcher = RPCDispatcher(
+            namespace=Namespace(),
+            timeout_strategy=timeout,
+            installer=FakePackageInstaller(),
+            config=RPCDispatcherConfig(),
+        )
 
         request = RPCRequest(id=1, method="exec", params={"code": "sleep(999)"})
         response = dispatcher.handle(request)

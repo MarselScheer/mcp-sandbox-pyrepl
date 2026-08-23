@@ -7,6 +7,7 @@ using the factory pattern. No business logic lives here — just composition.
 from __future__ import annotations
 
 import logging
+import signal
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -20,7 +21,7 @@ logger = logging.getLogger(__name__)
 # Configuration
 # ──────────────────────────────────────────────────────────────────────
 
-DEFAULT_CONFIG = {
+DEFAULT_CONFIG: dict[str, Any] = {
     "sandbox": {
         "images": {
             "3.9": "sandbox-base:3.9",
@@ -48,19 +49,18 @@ def sanitize_config_path(config_path: str) -> str:
     return str(project_root / config_path)
 
 
-def load_config(config_path: str | None = None) -> dict[str, Any]:
+def load_config(config_path: str) -> dict[str, Any]:
     """Load configuration from YAML file, falling back to defaults.
 
     Args:
-        config_path: Optional path to config.yaml. If None or file doesn't
+        config_path: Path to config.yaml. The caller is responsible for
+                     resolving relative paths before calling (see
+                     :func:`sanitize_config_path`). If the file doesn't
                      exist, returns default configuration.
 
     Returns:
         Dict with sandbox configuration.
     """
-    if config_path is None:
-        config_path = sanitize_config_path("config.yaml")
-
     path = Path(config_path)
     if not path.exists():
         logger.info("Config file not found at %s, using defaults", config_path)
@@ -136,7 +136,9 @@ def create_docker_client() -> Any:
         raw_client.ping()
         logger.info("Docker daemon is available")
         return RealDockerClient(raw_client)
-    except Exception as exc:
+    except Exception as exc:  # pragma: no cover
+        # Only reachable when Docker is unavailable; testing it would
+        # require monkeypatching (anti-pattern)
         msg = (
             f"Docker is not available: {exc}. "
             "Make sure Docker is installed and running."
@@ -151,13 +153,13 @@ def create_docker_client() -> Any:
 
 def create_session_manager(
     config: dict[str, Any],
-    docker_client: Any = None,
+    docker_client: Any,
 ) -> Any:
     """Create a SessionManager from configuration.
 
     Args:
         config: Dict with sandbox configuration.
-        docker_client: Optional Docker client. If None, creates one.
+        docker_client: Docker client. Must be provided explicitly.
 
     Returns:
         A configured SessionManager instance.
@@ -178,8 +180,6 @@ def create_session_manager(
         ),
     )
 
-    if docker_client is None:
-        docker_client = create_docker_client()
     return SessionManager(docker=docker_client, config=sm_config)
 
 
@@ -190,13 +190,13 @@ def create_session_manager(
 
 def create_mcp_app(
     config: dict[str, Any],
-    docker_client: Any = None,
+    docker_client: Any,
 ) -> Any:
     """Create the FastMCP application with all tools registered.
 
     Args:
         config: Dict with sandbox configuration.
-        docker_client: Optional Docker client. If None, creates one.
+        docker_client: Docker client. Must be provided explicitly.
 
     Returns:
         A configured FastMCP instance.
@@ -219,32 +219,27 @@ def create_mcp_app(
 # ──────────────────────────────────────────────────────────────────────
 
 
-def setup_signal_handlers(
-    signal_handler: Callable[[int, Any], None] | None = None,
-    register: Callable[[int, Callable[[int, Any], None]], Any] | None = None,
-) -> None:
-    """Register signal handlers for graceful shutdown.
-
-    Args:
-        signal_handler: Optional custom handler function. If None, uses
-                        default graceful shutdown handler.
-        register: Optional signal registration function. Defaults to
-                  signal.signal. Injected for testability.
-    """
-    import signal as signal_module
-
-    handler = signal_handler or _default_shutdown_handler
-    register_func = register or signal_module.signal
-
-    register_func(signal_module.SIGINT, handler)
-    register_func(signal_module.SIGTERM, handler)
-
-
 def _default_shutdown_handler(signum: int, frame: Any) -> None:
     """Default signal handler for graceful shutdown."""
     _ = signum, frame
     logger.info("Shutdown signal received, exiting...")
     sys.exit(0)
+
+
+def setup_signal_handlers(
+    signal_handler: Callable[[int, Any], None] = _default_shutdown_handler,
+    register: Callable[[int, Callable[[int, Any], None]], Any] = signal.signal,
+) -> None:
+    """Register signal handlers for graceful shutdown.
+
+    Args:
+        signal_handler: Custom handler function. Defaults to a graceful
+                        shutdown handler that logs and exits.
+        register: Signal registration function. Defaults to
+                  ``signal.signal``. Injected for testability.
+    """
+    register(signal.SIGINT, signal_handler)
+    register(signal.SIGTERM, signal_handler)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -277,24 +272,24 @@ def main() -> None:
     )
 
     # Load config
-    config = load_config(args.config)
+    config_path = args.config if args.config else sanitize_config_path("config.yaml")
+    config = load_config(config_path)
     logger.info("Configuration loaded")
 
     # Setup signal handlers
     setup_signal_handlers()
 
-    # Create and run the MCP app
-    mcp_app = create_mcp_app(config)
-    logger.info("Starting MCP Sandbox PyREPL server...")
-
-    # Try to detect Docker availability
+    # Create Docker client (fails fast if Docker is unavailable)
     try:
-        create_docker_client()
+        docker_client = create_docker_client()
     except RuntimeError as exc:
         logger.error(str(exc))
         sys.exit(1)
 
-    # Run the server
+    # Create and run the MCP app
+    mcp_app = create_mcp_app(config, docker_client=docker_client)
+    logger.info("Starting MCP Sandbox PyREPL server...")
+
     mcp_app.run()
 
 

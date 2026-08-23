@@ -174,3 +174,88 @@ class TestSessionEnd:
 
         session_manager.end_session(session_id)
         session_manager.end_session(session_id)
+
+    def test_end_session_removes_named_volumes(
+        self,
+        session_manager: SessionManager,
+    ) -> None:
+        """End a session and verify no named Docker volumes remain.
+
+        This test will fail before the fix: ``container_remove()`` only
+        removes the container, not the auto-generated named volumes
+        (``vol_<uuid>``). The fix adds volume inspection and cleanup.
+        """
+        import docker
+
+        docker_client = docker.from_env()
+        session_id = session_manager.create_session(python_version="3.12")
+        info = session_manager.get_session(session_id)
+        assert info is not None
+        container_id = info["container_id"]
+
+        # Collect the named volume names before ending the session.
+        # Pre-condition check: container must have named volumes for this
+        # assertion to be meaningful (otherwise the test would vacuously pass).
+        container = docker_client.containers.get(container_id)
+        mounts = container.attrs.get("Mounts", [])
+        volume_names = [
+            m["Name"] for m in mounts if m.get("Type") == "volume" and m.get("Name")
+        ]
+        assert len(volume_names) > 0, (
+            "Pre-condition: container has no named volumes — test would vacuously pass"
+        )
+
+        session_manager.end_session(session_id)
+
+        # Verify the named volumes are also removed
+        for vol_name in volume_names:
+            with pytest.raises(docker.errors.NotFound):
+                docker_client.volumes.get(vol_name)
+
+    def test_session_fixture_teardown_cleans_up_containers_and_volumes(
+        self,
+        session_manager: SessionManager,
+    ) -> None:
+        """Create a session via fixture, verify fixture teardown cleans up.
+
+        This test creates a session without explicitly calling
+        ``end_session()``. The fixture teardown (converted to generator-yield
+        pattern) should clean up the container and named volumes.
+
+        Before the fix: the ``session_manager`` fixture has no teardown logic,
+        so the container and volumes leak.
+        After the fix: the fixture teardown iterates remaining sessions and
+        ends each one, then removes the temp ``data_dir``.
+
+        Note: the fixture teardown runs *after* the test body, so the
+        actual cleanup assertion is covered by:
+        - ``test_end_session_removes_named_volumes`` — proves ``end_session()``
+          removes volumes
+        - Running the full test suite — proves fixture teardown doesn't crash
+          and leaves no leaks (verified by task 4.2)
+        """
+        import docker
+
+        docker_client = docker.from_env()
+        session_id = session_manager.create_session(python_version="3.12")
+        info = session_manager.get_session(session_id)
+        assert info is not None
+        container_id = info["container_id"]
+
+        # Verify the container is running
+        container = docker_client.containers.get(container_id)
+        assert container.status == "running"
+
+        # Record volume names
+        mounts = container.attrs.get("Mounts", [])
+        volume_names = [
+            m["Name"] for m in mounts if m.get("Type") == "volume" and m.get("Name")
+        ]
+        assert len(volume_names) > 0, (
+            "Pre-condition: container has no named volumes — test would vacuously pass"
+        )
+
+        # Don't call end_session() — fixture teardown should handle it.
+        # The fixture teardown runs after this test body exits.
+        # The actual cleanup is verified by the other test and by
+        # running the full test suite without volume leaks.

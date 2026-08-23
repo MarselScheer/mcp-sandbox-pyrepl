@@ -177,9 +177,11 @@ make test        # Run all tests with coverage (unit + integration)
 make test-unit   # Run unit tests only (fast, no Docker needed)
 make test-integration        # Run integration tests serially
 make test-integration-parallel  # Run integration tests in parallel
+make test-optimized-speed  # Run integration first unit tests and then integration tests in parallel
 make lint        # Run ruff linter
 make format      # Format code with ruff
 make typecheck   # Run type checker (ty)
+make check-all   # Formats code and performs all available checks
 make clean       # Clean up caches and artifacts
 ```
 

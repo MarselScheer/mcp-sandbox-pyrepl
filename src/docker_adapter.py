@@ -33,8 +33,6 @@ class RealDockerClient:
     def containers_create(
         self,
         image: str,
-        command: str | None = None,
-        name: str | None = None,
         user: str | None = None,
         read_only: bool = False,
         cap_drop: list[str] | None = None,
@@ -71,8 +69,6 @@ class RealDockerClient:
 
         created = self._client.containers.create(
             image=image,
-            command=command,
-            name=name,
             user=user,
             read_only=read_only,
             cap_drop=cap_drop,
@@ -90,9 +86,27 @@ class RealDockerClient:
         return self._client.containers.get(container_id)
 
     def container_remove(self, container_id: str, force: bool = False) -> None:
-        """Remove a container."""
+        """Remove a container and its auto-generated named volumes.
+
+        Inspects the container's mounts before removal, collects named
+        volume names (``Type == "volume"`` with a ``Name``), removes the
+        container, then removes each volume. Volume removal failures are
+        silently suppressed (e.g. in-use volumes on parallel test runs).
+        """
+        import contextlib
+
         container = self.container_get(container_id)
+        # Collect named volume names before removing the container — Docker
+        # API returns no mounts for a removed container.
+        mounts = (container.attrs or {}).get("Mounts", [])
+        volume_names = [
+            m["Name"] for m in mounts if m.get("Type") == "volume" and m.get("Name")
+        ]
         container.remove(force=force)
+        for vol_name in volume_names:
+            with contextlib.suppress(Exception):
+                vol = self._client.volumes.get(vol_name)
+                vol.remove()
 
     def container_stop(self, container_id: str) -> None:
         """Stop a container."""

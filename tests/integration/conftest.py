@@ -16,6 +16,7 @@ Design:
 from __future__ import annotations
 
 import logging
+import shutil
 import time
 from collections.abc import Generator
 from pathlib import Path
@@ -30,6 +31,17 @@ from session_manager import (
 )
 
 logger = logging.getLogger(__name__)
+
+# ──────────────────────────────────────────────────────────────────────
+# Shared fixtures
+# ──────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def dummy_image_registry() -> dict[str, str]:
+    """Minimal image registry for tests that don't exercise version listing."""
+    return {}
+
 
 # ──────────────────────────────────────────────────────────────────────
 # Helpers
@@ -83,11 +95,12 @@ def docker_available() -> bool:
 
 
 @pytest.fixture
-def session_manager(docker_available: bool) -> SessionManager:
+def session_manager(docker_available: bool) -> Generator[SessionManager, None, None]:
     """Create a SessionManager with a real Docker client.
 
     Function-scoped so each test gets a clean SessionManager.
     Uses the prebuilt ``sandbox-base:3.12`` image.
+    Teardown: ends any remaining sessions and removes the data directory.
     """
     if not docker_available:
         pytest.skip("Docker or sandbox-base:3.12 image not available")
@@ -112,7 +125,14 @@ def session_manager(docker_available: bool) -> SessionManager:
     manager = SessionManager(docker=adapter, config=config)
     elapsed = time.perf_counter() - t0
     logger.info("TIMING session_manager fixture setup: %.3fs", elapsed)
-    return manager
+
+    yield manager
+
+    # Teardown: end any remaining sessions (defensive — catches tests
+    # that forget to call end_session()), then remove the data directory.
+    for sid in list(manager.list_sessions()):
+        manager.end_session(sid)
+    shutil.rmtree(data_dir, ignore_errors=True)
 
 
 @pytest.fixture
@@ -189,3 +209,4 @@ def class_container(docker_available: bool) -> Generator[dict[str, Any], None, N
     manager.end_session(session_id)
     teardown_elapsed = time.perf_counter() - t1
     logger.info("TIMING class_container end: %.3fs", teardown_elapsed)
+    shutil.rmtree(data_dir, ignore_errors=True)

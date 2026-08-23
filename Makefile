@@ -25,6 +25,8 @@ test-integration:
 test-integration-parallel:
 	uv run pytest -v --tb=short -n auto tests/integration
 
+test-optimized-speed: test-unit test-integration-parallel
+
 lint:
 	uv run ruff check src/ tests/
 
@@ -37,7 +39,7 @@ format-check:
 typecheck:
 	uv run ty check src/
 
-check: lint typecheck test
+check-all: format format-check lint typecheck test-optimized-speed
 
 clean:
 	rm -rf __pycache__/ .ruff_cache/ .mypy_cache/ .pytest_cache/ htmlcov/ .coverage

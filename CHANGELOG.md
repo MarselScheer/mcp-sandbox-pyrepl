@@ -5,6 +5,62 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — 2026-08-23
+
+### Added
+
+- **Optimized speed test workflow** — New `test-optimized-speed` Makefile target running unit tests first (fast, no Docker), then integration tests in parallel (`test-unit && test-integration-parallel`)
+- **Comprehensive check workflow** — New `check-all` Makefile target running `format → format-check → lint → typecheck → test-optimized-speed`, replacing the old `check` target, providing a single-command pre-commit/CI gate
+- **Named volume cleanup on container removal** — `RealDockerClient.container_remove()` now inspects container mounts before removal, collects named volume names (`Type == "volume"`), removes the container, then removes each volume. Volume removal failures are silently suppressed (e.g. in-use volumes on parallel test runs)
+- **`_create_container()` helper** (`session_manager.py`) — Extracted common container creation parameters (named volumes, tmpfs, read-only root, etc.) into a private method shared by `create_session()` and `restart_session()`, eliminating duplicated volume configuration
+- **`_merge_config()` function** (`main.py`) — Extracted config merging logic from `load_config()` into a testable pure function
+- **`_default_shutdown_handler()` function** (`main.py`) — Extracted default signal handler to module level so it can be used as a real default parameter (no `None` sentinel)
+- **Unit tests for error handling paths** (`tests/unit/test_session_manager.py`, `tests/unit/test_mcp_server.py`) — Fast, Docker-free tests covering session corruption recovery, package install exception handling, network operations on nonexistent sessions, and file operations on nonexistent sessions
+- **`stub_dispatcher` fixture** (`tests/unit/conftest.py`) — Shared fixture wiring `RPCDispatcher` with no-op fakes (`Namespace`, `NoOpTimeoutStrategy`, `FakePackageInstaller`) for routing-only server loop tests
+- **`FakePackageInstaller` shared fixture** — Moved from inline class in `test_entrypoint_dispatcher.py` to shared `tests/unit/conftest.py` for reuse across unit test files
+- **`dummy_image_registry` fixture** (`tests/integration/conftest.py`, `tests/unit/conftest.py`) — Minimal image registry fixture for tests that don't exercise version listing
+- **Config merging tests** (`TestMergeConfig` in `tests/unit/test_main.py`) — Tests verifying user config merges correctly into defaults for images, defaults, and data_dir overrides
+- **Config loading error handling tests** (`TestLoadConfigErrors` in `tests/unit/test_main.py`) — Tests verifying malformed YAML falls back to default configuration
+- **Volume cleanup integration tests** (`tests/integration/test_session.py`) — `test_end_session_removes_named_volumes` verifying named Docker volumes are removed after session end, and `test_session_fixture_teardown_cleans_up_containers_and_volumes` verifying fixture teardown handles cleanup without explicit `end_session()` call
+
+### Changed
+
+- **Dependency injection: `None` sentinel elimination** — All `Optional[T] = None` patterns with hidden fallback creation replaced with required parameters or real defaults across the codebase:
+  - `RPCDispatcher.__init__()` — `namespace`, `timeout_strategy`, `installer`, and `config` are now **required** parameters (no fallback creation)
+  - `SessionServer.__init__()` — `dispatcher` is now **required**; `stdin`/`stdout` default to `sys.stdin`/`sys.stdout` (real, usable values)
+  - `MCPToolHandler.__init__()` — `image_registry` is now **required** (no hidden built-in default registry)
+  - `SessionManager.__init__()` — `config` defaults to `SessionManagerConfig()` (frozen dataclass — safe immutable default, not a sentinel)
+  - `create_session_manager()` / `create_mcp_app()` (`main.py`) — `docker_client` is now **required** (caller must provide it explicitly)
+  - `load_config()` (`main.py`) — `config_path` is now **required**; caller calls `sanitize_config_path()` before passing it
+  - `setup_signal_handlers()` (`main.py`) — `signal_handler` defaults to `_default_shutdown_handler` (callable, real default); `register` defaults to `signal.signal` (callable, real default)
+  - `entrypoint.py:main()` — Explicitly constructs all dependencies (`RPCDispatcherConfig`, `Namespace`, `ThreadTimeoutStrategy`, `PackageInstaller`, `RPCDispatcher`, `SessionServer`) instead of relying on `None` fallback defaults
+- **`main.py` startup flow** — Docker client is now created early (before MCP app creation), failing fast with a clear error if Docker is unavailable. The created client is then passed explicitly to `create_mcp_app()` and `create_session_manager()`, making the dependency chain fully visible in the composition root
+- **`MCPToolHandler.create_session()`** — `python_version` is now optional (`None` means use the `SessionManager`'s configured default). When both `python_version` and `image` are `None`, neither is passed to `SessionManager.create_session()` (previously always passed `python_version="3.12"`)
+- **`RealDockerClient.containers_create()`** — Removed unused `command` and `name` parameters from the method and the `DockerClient` Protocol
+- **Fixture teardown** (`tests/integration/conftest.py`) — `session_manager` fixture converted to generator-yield pattern with teardown that ends remaining sessions and removes the data directory. `class_container` fixture now also cleans up the data directory on teardown
+- **Integration tests using `MCPToolHandler`** — All now pass `dummy_image_registry` explicitly instead of relying on `MCPToolHandler`'s built-in default
+- **Unit test routing tests** (`test_entrypoint_dispatcher.py`, `test_entrypoint_server.py`) — Migrated from inline `FakePackageInstaller` and inline dispatcher construction to the shared `stub_dispatcher` fixture where applicable, and explicitly construct dispatchers with all required dependencies otherwise
+- **Makefile** — Replaced `check` target with `check-all` which runs the complete `format → format-check → lint → typecheck → test-optimized-speed` pipeline
+- **README** — Updated Makefile targets documentation with `test-optimized-speed` and `check-all`
+
+### Fixed
+
+- **Named Docker volume leak** — `RealDockerClient.container_remove()` now inspects and removes auto-generated named volumes (`vol_<uuid>`) after removing the container, preventing orphaned volumes from accumulating on the Docker host
+- **Test session leaks** — `tests/integration/test_main.py` and `tests/integration/test_session_manager.py` now use `try/finally` to ensure sessions are ended even on assertion failure, preventing container and volume leaks from failed tests
+- **Fixture resource leaks** — `session_manager` fixture in `tests/integration/conftest.py` now properly tears down remaining sessions and removes the temp `data_dir` via generator-yield pattern; `class_container` fixture now also cleans up `data_dir` on teardown
+
+### Documentation
+
+- **Design principles** (`.opencode/rules/design-principles.md`) — Added comprehensive "No `None` sentinels for dependencies" rule (section 2), detailing:
+  - Why `None` sentinels with hidden fallback creation are an anti-pattern
+  - Immutable defaults (`sys.stdin`, frozen dataclasses, callables) as safe alternatives
+  - Mutable/stateful service objects as required parameters
+  - Docstring hints for required params
+  - Rule of thumb table for default type verdicts
+  - The exception: `None` meaning "no value" (not "create something")
+- **Anti-patterns table** — Added "`None` sentinel defaults" and "Duplicated defaults across layers" entries
+- **README** — Updated Makefile targets documentation to include `test-optimized-speed` and `check-all`
+
 ## [0.4.2] — 2026-08-22
 
 ### Added
