@@ -39,7 +39,7 @@ format-check:
 typecheck:
 	uv run ty check src/
 
-check: lint typecheck test
+check-all: format format-check lint typecheck test-optimized-speed
 
 clean:
 	rm -rf __pycache__/ .ruff_cache/ .mypy_cache/ .pytest_cache/ htmlcov/ .coverage
