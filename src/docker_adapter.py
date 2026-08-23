@@ -33,8 +33,6 @@ class RealDockerClient:
     def containers_create(
         self,
         image: str,
-        command: str | None = None,
-        name: str | None = None,
         user: str | None = None,
         read_only: bool = False,
         cap_drop: list[str] | None = None,
@@ -71,8 +69,6 @@ class RealDockerClient:
 
         created = self._client.containers.create(
             image=image,
-            command=command,
-            name=name,
             user=user,
             read_only=read_only,
             cap_drop=cap_drop,
