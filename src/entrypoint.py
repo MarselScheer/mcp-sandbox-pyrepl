@@ -246,10 +246,10 @@ class ThreadTimeoutStrategy:
         ret = ctypes.pythonapi.PyThreadState_SetAsyncExc(
             ctypes.c_long(tid), ctypes.py_object(exc_type)
         )
-        if ret == 0:
+        if ret == 0:  # pragma: no cover
             # Thread not found — nothing to interrupt
             return
-        if ret > 1:
+        if ret > 1:  # pragma: no cover
             # Exception was sent to multiple threads (shouldn't happen).
             # Reset by sending None to undo.
             ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_long(tid), None)
