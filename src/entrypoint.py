@@ -464,11 +464,8 @@ class RPCDispatcher:
         req_id: int | str | None,
         code: int,
         message: str,
-        data: Any = None,
     ) -> dict[str, Any]:
         error: dict[str, Any] = {"code": code, "message": message}
-        if data is not None:
-            error["data"] = data
         return {"jsonrpc": "2.0", "id": req_id, "error": error}
 
     @staticmethod
@@ -540,7 +537,7 @@ class SessionServer:
 # ──────────────────────────────────────────────────────────────────────
 
 
-def main() -> None:
+def main() -> None:  # pragma: no cover
     """Entry point for the entrypoint script."""
     config = RPCDispatcherConfig()
     namespace = Namespace()
@@ -562,5 +559,5 @@ def main() -> None:
     server.run()
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     main()
