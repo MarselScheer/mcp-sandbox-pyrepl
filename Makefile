@@ -4,7 +4,7 @@ install:
 	uv sync --group dev
 
 test:
-	uv run pytest -v --tb=short --cov=src --cov-report term-missing tests/unit tests/integration
+	uv run pytest -v --tb=short --cov=src --cov-report term-missing -n auto tests/unit tests/integration
 
 # Fast unit tests only — no Docker needed.
 # Designed for the TDD cycle: run after every code change.
