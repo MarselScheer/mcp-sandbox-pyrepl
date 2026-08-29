@@ -151,7 +151,7 @@ uv run mcp-sandbox-pyrepl --config /path/to/config.yaml
 |---|---|
 | `create_session` | Create a new sandboxed REPL session. Specify `python_version` (e.g., `"3.12"`) or a custom `image`. |
 | `execute_python` | Execute Python code in a session. Returns `stdout`, `stderr`, `display`, and `error`. Configurable `timeout` (default: 30s). |
-| `install_packages` | Install Python packages via `uv`. Temporarily enables network access. |
+| `install_packages` | Install Python packages via `uv`. Temporarily enables network access. Each package entry requires `{"name": "pkg_name"}` and optionally `{"version": "exact.version"}` (joined with `==`). |
 | `list_sessions` | List all active sessions with metadata. |
 | `get_session` | Get details about a specific session. |
 | `end_session` | Terminate a session and clean up the container. Idempotent. |

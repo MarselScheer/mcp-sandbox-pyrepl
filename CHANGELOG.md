@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] — 2026-09-01
+
+### Added
+
+- **`DockerFrameReader` class** (`src/docker_adapter.py`) — Encapsulates Docker-multiplexed frame parsing (8-byte header + payload: stream type, reserved, big-endian uint32 length). Provides `recv_exact()` (partial-read-aware loop) and `read_frame()` (returns `(stream_type, payload)` or `None` on EOF). Injected via constructor for testability
+- **`_attach_raw_socket()` shared helper** (`src/docker_adapter.py`) — Extracts a raw `socket.socket` from `container.attach_socket()`, handling `SocketIO` unwrapping via `._sock` (docker-py 7.1.0+ on Python 3.14+). Used by both `container_stdin()` and `container_rpc()` via explicit `params`
+- **`TMPDIR=/session` in PackageInstaller** (`src/entrypoint.py`) — Sets `TMPDIR` environment variable to the `/session` named volume when running `uv pip install`, preventing large wheel extraction (pandas, polars, scipy) from exhausting the 64 MB tmpfs at `/tmp`
+- **Integration tests for `container_stdin()`** (`tests/integration/test_session_manager.py`) — `TestContainerStdin` class (3 tests) verifying `container_stdin()` returns a writable `io.TextIOWrapper`, exercises the write/flush path (same pattern used by `_send_shutdown()`), and documents the internal `SocketIO` return type for future docker-py version awareness
+- **Integration test for socket timeout** (`tests/integration/test_execution.py`) — `test_container_rpc_socket_timeout` verifying that `container_rpc()` raises `ConnectionError` when the attach socket times out (10.0s timeout), validating the `sock.settimeout()` path replaces the old exponential-backoff polling loop
+
+### Changed
+
+- **`RealDockerClient.container_rpc()` rewritten** (`src/docker_adapter.py`) — Replaced the previous two-legged approach (`docker exec` subprocess writes to `/proc/1/fd/0` + `container.logs()` polling with exponential backoff) with a single bidirectional `attach_socket`:
+  - Write side: raw `sendall()` of JSON-RPC request bytes to stdin
+  - Read side: blocking `recv()` with `sock.settimeout(10.0)` parsing Docker-multiplexed frames via `DockerFrameReader`
+  - Eliminates subprocess overhead per call and polling latency (10–100ms → sub-ms response)
+  - Response matching by `request["id"]` preserved from previous implementation
+  - Stderr frames (type 2) silently skipped; valid JSON with matching `id` returned
+- **`RealDockerClient.container_stdin()` refactored** (`src/docker_adapter.py`) — Delegates socket extraction to the shared `_attach_raw_socket()` helper instead of duplicating the `SocketIO` unwrapping logic. Falls back to direct file-like object handling if `_attach_raw_socket()` raises `TypeError`
+- **`RealDockerClient.__init__()`** (`src/docker_adapter.py`) — Now accepts optional `frame_reader` parameter (type `DockerFrameReader`, default `DockerFrameReader`) for constructor injection, enabling unit tests to supply a fake frame reader; instantiates `self._frame_reader = frame_reader()` at init time
+
+### Documentation
+
+- **MCP tool docstring for `install_packages`** (`src/mcp_server.py`) — Added detailed documentation specifying the required `"name"` key and optional `"version"` key syntax, with inline code examples for single and multi-package calls
+- **README tools table** — Updated `install_packages` row with note about package entry format (`{"name": "pkg_name"}` optionally with `{"version": "exact.version"}` joined with `==`)
+
 ## [0.6.0] — 2026-08-29
 
 ### Added
