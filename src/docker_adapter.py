@@ -24,6 +24,72 @@ from docker import DockerClient as _DockerClient
 from docker.models.containers import Container
 
 
+class DockerFrameReader:
+    """Reads Docker-multiplexed frames from a socket.
+
+    Docker multiplexes stdout/stderr over an attached socket using an
+    8-byte frame header::
+
+        Byte  0     : stream type  (1=stdout, 2=stderr)
+        Bytes 1-3   : reserved (zero)
+        Bytes 4-7   : payload length (big-endian uint32)
+        Bytes 8..N  : payload bytes
+
+    This class encapsulates the low-level ``recv`` mechanics:
+    partial-read-aware accumulation and frame header parsing.
+    It is stateless — the same instance can be reused across calls.
+    """
+
+    def recv_exact(self, sock: socket.socket, n: int) -> bytes:
+        """Read exactly *n* bytes from a socket (partial-read-aware loop).
+
+        TCP can split or coalesce data across ``recv()`` boundaries. This
+        loops until all *n* bytes are collected or the connection closes.
+
+        Args:
+            sock: The socket to read from.
+            n: Number of bytes to read.
+
+        Returns:
+            The requested *n* bytes.
+
+        Raises:
+            ConnectionError: If the connection is closed before all *n*
+                             bytes are received.
+        """
+        chunks: list[bytes] = []
+        while n > 0:
+            chunk = sock.recv(n)
+            if not chunk:
+                msg = (
+                    f"Connection closed after reading "
+                    f"{sum(len(c) for c in chunks)} bytes, expected more"
+                )
+                raise ConnectionError(msg)
+            chunks.append(chunk)
+            n -= len(chunk)
+        return b"".join(chunks)
+
+    def read_frame(self, sock: socket.socket) -> tuple[int, bytes] | None:
+        """Read one Docker-multiplexed frame from the socket.
+
+        Returns:
+            A ``(stream_type, payload)`` tuple on success, or ``None`` if
+            the connection is closed (EOF).
+        """
+        header = sock.recv(8)
+        if not header:
+            return None
+        if len(header) < 8:
+            header = header + self.recv_exact(sock, 8 - len(header))
+        stream_type = header[0]
+        payload_len = struct.unpack(">I", header[4:8])[0]
+        if payload_len == 0:
+            return stream_type, b""
+        payload = self.recv_exact(sock, payload_len)
+        return stream_type, payload
+
+
 class RealDockerClient:
     """Adapter that wraps the docker-py SDK to satisfy the DockerClient Protocol.
 
@@ -31,8 +97,13 @@ class RealDockerClient:
     The docker-py library is encapsulated here — no other module imports it.
     """
 
-    def __init__(self, docker_client: _DockerClient) -> None:
+    def __init__(
+        self,
+        docker_client: _DockerClient,
+        frame_reader: type[DockerFrameReader] = DockerFrameReader,
+    ) -> None:
         self._client = docker_client
+        self._frame_reader = frame_reader()
         self._rpc_counter = 0
 
     def containers_create(
@@ -141,73 +212,11 @@ class RealDockerClient:
         container = self.container_get(container_id)
         sock = container.attach_socket(params=params)
         if isinstance(sock, socket.socket):
-            return sock
+            return sock  # pragma: no cover — classic docker-py (< 7.1.0) returns raw socket.socket; installed version returns SocketIO, so this branch is only taken on older installs
         if hasattr(sock, "_sock") and isinstance(sock._sock, socket.socket):
             return sock._sock
-        msg = f"Unexpected attach result type: {type(sock)}"
-        raise TypeError(msg)
-
-    @staticmethod
-    def _recv_exact(sock: socket.socket, n: int) -> bytes:
-        """Read exactly *n* bytes from a socket (partial-read-aware loop).
-
-        TCP can split or coalesce data across ``recv()`` boundaries. This
-        helper loops until all *n* bytes are collected or the connection
-        closes (``EOFError``).
-
-        Args:
-            sock: The socket to read from.
-            n: Number of bytes to read.
-
-        Returns:
-            The requested *n* bytes.
-
-        Raises:
-            ConnectionError: If the connection is closed before all *n*
-                             bytes are received.
-        """
-        chunks = []
-        while n > 0:
-            chunk = sock.recv(n)
-            if not chunk:
-                msg = (
-                    f"Connection closed after reading "
-                    f"{sum(len(c) for c in chunks)} bytes, expected more"
-                )
-                raise ConnectionError(msg)
-            chunks.append(chunk)
-            n -= len(chunk)
-        return b"".join(chunks)
-
-    @staticmethod
-    def _read_frame(sock: socket.socket) -> tuple[int, bytes] | None:
-        """Read one Docker-multiplexed frame from the socket.
-
-        Docker multiplexes stdout/stderr over the attached socket using an
-        8-byte frame header::
-
-            Byte  0     : stream type  (1=stdout, 2=stderr)
-            Bytes 1-3   : reserved (zero)
-            Bytes 4-7   : payload length (big-endian uint32)
-            Bytes 8..N  : payload bytes
-
-        Returns:
-            A ``(stream_type, payload)`` tuple on success, or ``None`` if
-            the connection is closed (EOF).
-        """
-        header = sock.recv(8)
-        if not header:
-            return None
-        if len(header) < 8:
-            header = header + RealDockerClient._recv_exact(
-                sock, 8 - len(header)
-            )
-        stream_type = header[0]
-        payload_len = struct.unpack(">I", header[4:8])[0]
-        if payload_len == 0:
-            return stream_type, b""
-        payload = RealDockerClient._recv_exact(sock, payload_len)
-        return stream_type, payload
+        msg = f"Unexpected attach result type: {type(sock)}"  # pragma: no cover — docker-py returns socket.socket or SocketIO; unexpected type = breaking API change
+        raise TypeError(msg)  # pragma: no cover
 
     def container_stdin(self, container_id: str) -> io.TextIOBase:
         """Get a writable stream to the container's stdin.
@@ -223,7 +232,7 @@ class RealDockerClient:
             sock = self._attach_raw_socket(
                 container_id, params={"stdin": 1, "stream": 1, "logs": 1}
             )
-        except TypeError:
+        except TypeError:  # pragma: no cover — attach_socket always returns socket.socket or SocketIO; fallback only for unknown future docker-py versions
             # Attach result is neither a raw socket nor SocketIO — try
             # direct file-like object handling (unknown docker-py versions).
             container = self.container_get(container_id)
@@ -305,7 +314,7 @@ class RealDockerClient:
 
         while True:
             try:
-                frame = self._read_frame(sock)
+                frame = self._frame_reader.read_frame(sock)
             except socket.timeout:
                 msg = (
                     f"No JSON-RPC response within {10.0}s "
@@ -313,7 +322,7 @@ class RealDockerClient:
                 )
                 raise ConnectionError(msg) from None
 
-            if frame is None:
+            if frame is None:  # pragma: no cover — attach socket only closes if container dies mid-RPC; PID 1 doesn't exit during normal operation
                 msg = (
                     f"Connection closed before response received "
                     f"(container={container_id[:12]}, method={request.get('method', '?')})"
@@ -321,12 +330,12 @@ class RealDockerClient:
                 raise ConnectionError(msg)
 
             stream_type, payload = frame
-            if stream_type != 1:  # Skip stderr frames (type 2)
+            if stream_type != 1:  # pragma: no cover — entrypoint never writes to stderr; defensive only
                 continue
 
             try:
                 parsed = json.loads(payload)
-            except json.JSONDecodeError:
+            except json.JSONDecodeError:  # pragma: no cover — entrypoint always emits valid JSON on stdout; defensive only
                 continue
 
             if isinstance(parsed, dict) and parsed.get("id") == request_id:

@@ -15,6 +15,7 @@ from __future__ import annotations
 import time
 
 import docker
+import pytest
 
 from tests.integration.rpc_helpers import rpc_call
 
@@ -149,6 +150,43 @@ class TestCodeExecution:
         assert error is not None, f"Expected a timeout error, got: {result}"
         assert any(kw in error.lower() for kw in ["timed out", "timeout"]), (
             f"Expected timeout-related error, got: {error}"
+        )
+
+    def test_container_rpc_socket_timeout(
+        self,
+        class_container: dict,
+    ) -> None:
+        """``container_rpc`` raises ``ConnectionError`` when the socket times out.
+
+        ``container_rpc`` sets ``sock.settimeout(10.0)`` on the attach socket.
+        If the entrypoint takes longer than 10s to respond, ``read_frame``
+        raises ``socket.timeout`` → ``ConnectionError``.
+
+        We send an ``exec`` request with ``timeout=6.0`` and ``time.sleep(60)``
+        — the entrypoint's ``ThreadTimeoutStrategy`` waits 6s then another 5s
+        for hard timeout cleanup, totalling ~11s. Our socket timeout fires at
+        10s.
+        """
+        container_id = class_container["container_id"]
+        docker_client = docker.from_env()
+
+        start = time.time()
+        with pytest.raises(ConnectionError, match="No JSON-RPC response within"):
+            rpc_call(
+                docker_client,
+                container_id,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "exec",
+                    "params": {"code": "import time; time.sleep(60)", "timeout": 6.0},
+                },
+            )
+        elapsed = time.time() - start
+
+        # Socket timeout is 10s; allow some clock skew.
+        assert elapsed < 14.0, (
+            f"Expected socket timeout within ~10s, got {elapsed:.2f}s"
         )
 
     def test_display_hook_captures_expression_value(
