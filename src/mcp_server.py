@@ -116,9 +116,20 @@ class MCPToolHandler:
 
         Temporarily enables network access for the container.
 
+        Each package dict must have a ``"name"`` key (the package name)
+        and may optionally have a ``"version"`` key for exact version pinning
+        (joined with ``==``).
+
+        Example:
+            install_packages(
+                session_id="sess_abc",
+                packages=[{"name": "pandas"}, {"name": "scipy", "version": "1.11.0"}],
+            )
+
         Args:
             session_id: Target session identifier.
-            packages: List of packages with optional version specifiers.
+            packages: List of dicts, each with a ``"name"`` key and
+                      optionally a ``"version"`` key.
 
         Returns:
             Dict with success status and output.
