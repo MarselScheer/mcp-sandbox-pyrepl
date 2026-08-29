@@ -398,3 +398,116 @@ class TestContainersCreateHostPath:
                 )
             finally:
                 container.remove(force=True)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Tests: RealDockerClient.container_stdin() paths
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestContainerStdin:
+    """Tests ``RealDockerClient.container_stdin()`` against a real container.
+
+    ``container_stdin()`` attaches a socket to the container's stdin via
+    ``attach_socket()`` and wraps it in a ``TextIOWrapper``.  The code
+    handles three branches:
+
+    1. ``socket.socket`` (classic docker-py) — ``makefile("wb")`` directly.
+    2. ``socket.SocketIO`` (docker-py 7.1.0 on Python 3.14+) — extracts
+       the underlying ``socket.socket`` via ``._sock``.
+    3. Arbitrary writable file-like object (fallback).
+
+    These tests confirm that a real container produces a writable
+    ``TextIOWrapper``, regardless of which internal branch is taken.
+    """
+
+    def test_container_stdin_returns_textiowrapper(
+        self, session_manager: SessionManager,
+    ) -> None:
+        """``container_stdin()`` returns an ``io.TextIOWrapper`` after unwrapping."""
+        import io
+
+        adapter = session_manager._docker
+        session_id = session_manager.create_session(python_version="3.12")
+        try:
+            info = session_manager.get_session(session_id)
+            assert info is not None
+            container_id = info["container_id"]
+
+            stdin = adapter.container_stdin(container_id)
+
+            assert isinstance(stdin, io.TextIOWrapper), (
+                f"Expected TextIOWrapper, got {type(stdin)}"
+            )
+        finally:
+            session_manager.end_session(session_id)
+
+    def test_container_stdin_stream_is_writable(
+        self, session_manager: SessionManager,
+    ) -> None:
+        """The returned stream supports ``write()`` and ``flush()``.
+
+        This exercises the actual path used by ``_send_shutdown()`` in
+        production — writing a JSON-RPC notification to the container's
+        stdin.
+        """
+        import json
+
+        adapter = session_manager._docker
+        session_id = session_manager.create_session(python_version="3.12")
+        try:
+            info = session_manager.get_session(session_id)
+            assert info is not None
+            container_id = info["container_id"]
+
+            stdin = adapter.container_stdin(container_id)
+
+            # Write a minimal JSON-RPC notification (no response expected).
+            # This is the same pattern used by _send_shutdown().
+            request = {"jsonrpc": "2.0", "method": "ping", "params": {}}
+            line = json.dumps(request) + "\n"
+
+            # Should not raise
+            stdin.write(line)
+            stdin.flush()
+        finally:
+            session_manager.end_session(session_id)
+
+    def test_container_stdin_underlying_socket_is_socketio(
+        self, session_manager: SessionManager,
+    ) -> None:
+        """Confirm the internal ``attach_socket()`` returns a ``SocketIO``.
+
+        With docker-py 7.1.0 on Python 3.14+, ``attach_socket()`` returns
+        a ``socket.SocketIO`` (not a raw ``socket.socket``), which is
+        read-only.  The fix in ``container_stdin()`` extracts the
+        underlying ``socket.socket`` via ``._sock`` to get a writable
+        stream.
+
+        This test documents the internal type so that if a future docker-py
+        version changes the return type, the developer will know which
+        branch is active and whether the fix still applies.
+        """
+        import socket as _socket
+
+        adapter = session_manager._docker
+        session_id = session_manager.create_session(python_version="3.12")
+        try:
+            info = session_manager.get_session(session_id)
+            assert info is not None
+            container_id = info["container_id"]
+
+            container = adapter.container_get(container_id)
+            sock = container.attach_socket(
+                params={"stdin": 1, "stream": 1, "logs": 1},
+            )
+
+            # The current docker-py version returns a SocketIO.
+            # If this assertion fails, docker-py changed its return type
+            # and the first branch (socket.socket) may now be taken.
+            assert isinstance(sock, _socket.SocketIO), (
+                f"attach_socket() returned {type(sock)} — "
+                f"not SocketIO.  The _sock workaround may no longer be needed."
+            )
+        finally:
+            session_manager.end_session(session_id)

@@ -117,19 +117,39 @@ class RealDockerClient:
         """Get a writable stream to the container's stdin.
 
         Returns a file-like object supporting ``.write()`` and ``.flush()``.
-        Uses docker-py's ``attach_socket`` to get a raw socket, then wraps
-        it in a ``TextIOWrapper`` for text I/O.
+        Uses docker-py's ``attach_socket`` to get a socket, then wraps it
+        in a ``TextIOWrapper`` for text I/O.
+
+        Three code paths handled:
+
+        1. ``socket.socket`` (classic docker-py) — ``makefile("wb")``
+           directly on the socket.
+        2. ``socket.SocketIO`` (docker-py 7.1.0 on Python 3.14+) —
+           extracts the underlying ``socket.socket`` via ``._sock``, then
+           ``makefile("wb")`` on that.
+        3. Arbitrary file-like object (unknown docker-py versions) —
+           only returned if ``.writable()`` is truthy (or absent, for
+           backward compatibility).
         """
         container = self.container_get(container_id)
         sock = container.attach_socket(params={"stdin": 1, "stream": 1, "logs": 1})
+        # Case 1: raw socket.socket — classic docker-py
         if isinstance(sock, socket.socket):
             return io.TextIOWrapper(
                 io.BufferedWriter(sock.makefile("wb")),
                 encoding="utf-8",
                 line_buffering=True,
             )
-        # Some versions return a file-like object directly
-        if hasattr(sock, "write"):
+        # Case 2: socket.SocketIO (Python 3.14+) — unwrap to the
+        # underlying socket.socket via _sock, then wrap for text I/O.
+        if hasattr(sock, "_sock") and isinstance(sock._sock, socket.socket):
+            return io.TextIOWrapper(
+                io.BufferedWriter(sock._sock.makefile("wb")),
+                encoding="utf-8",
+                line_buffering=True,
+            )
+        # Case 3: file-like object directly (some docker-py versions)
+        if hasattr(sock, "write") and getattr(sock, "writable", lambda: True)():
             return sock  # type: ignore[return-value]
         msg = f"Unexpected stdin type: {type(sock)}"
         raise TypeError(msg)
