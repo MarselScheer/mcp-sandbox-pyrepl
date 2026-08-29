@@ -43,12 +43,63 @@ class TestNamespaceExec:
         assert result.error is None
 
     def test_syntax_error(self) -> None:
+        """Syntax error caught by inner compile('single') — no output produced."""
         namespace = Namespace()
 
         result = namespace.exec("x = ")
 
+        assert result.stdout == ""
+        # stderr is empty for compile-time errors (error info is in the .error field)
+        assert result.display == []
         assert result.error is not None
         assert "SyntaxError" in result.error
+
+    def test_syntax_error_with_invalid_expression(self) -> None:
+        """Syntax error from an invalid operator expression.
+
+        Exercises the inner compile('single') → SyntaxError path
+        where the error message does NOT contain 'multiple statements'.
+        """
+        namespace = Namespace()
+
+        result = namespace.exec("1 +* 2")
+
+        assert result.stdout == ""
+        assert result.display == []
+        assert result.error is not None
+        assert "SyntaxError" in result.error
+
+    def test_syntax_error_through_exec_fallback(self) -> None:
+        """Syntax error that goes through the 'single' → 'exec' fallback.
+
+        Multi-line code that triggers 'multiple statements found' in
+        'single' mode, then fails again in 'exec' mode with a different
+        syntax error. Exercises the outer except SyntaxError path.
+        """
+        namespace = Namespace()
+
+        result = namespace.exec("x=1\ny=2\ndef foo():\nx = 1")
+
+        assert result.stdout == ""
+        assert result.display == []
+        assert result.error is not None
+        assert "SyntaxError" in result.error
+        # Should mention indentation since the body isn't indented
+        assert "indent" in result.error.lower() or "expected" in result.error.lower()
+
+    def test_syntax_error_preserves_namespace_state(self) -> None:
+        """Syntax errors should not corrupt the namespace."""
+        namespace = Namespace()
+
+        namespace.exec("x = 42")
+        result = namespace.exec("bad syntax !!!")
+        assert result.error is not None
+        assert "SyntaxError" in result.error
+
+        # Existing state should still be accessible
+        result2 = namespace.exec("print(x)")
+        assert result2.stdout == "42\n"
+        assert result2.error is None
 
     def test_runtime_error(self) -> None:
         namespace = Namespace()
@@ -98,6 +149,49 @@ class TestNamespaceExec:
         result = namespace.exec("import math\nprint(math.pi)")
 
         assert "3.14" in result.stdout
+        assert result.error is None
+
+    def test_system_exit_swallowed(self) -> None:
+        """SystemExit should be swallowed — not propagated, no error output."""
+        namespace = Namespace()
+
+        result = namespace.exec("raise SystemExit()")
+
+        assert result.stdout == ""
+        assert result.stderr == ""
+        assert result.display == []
+        assert result.error is None
+
+    def test_sys_exit_swallowed(self) -> None:
+        """sys.exit() raises SystemExit, which should also be swallowed."""
+        namespace = Namespace()
+
+        result = namespace.exec("import sys\nsys.exit(0)")
+
+        assert result.stdout == ""
+        assert result.stderr == ""
+        assert result.error is None
+
+    def test_system_exit_preserves_namespace_state(self) -> None:
+        """State set before a SystemExit should persist after."""
+        namespace = Namespace()
+
+        namespace.exec("x = 42")
+        namespace.exec("raise SystemExit()")
+
+        result = namespace.exec("print(x)")
+        assert result.stdout == "42\n"
+        assert result.error is None
+
+    def test_system_exit_with_message_swallowed(self) -> None:
+        """SystemExit with an integer code or string message is swallowed."""
+        namespace = Namespace()
+
+        result = namespace.exec("raise SystemExit(42)")
+
+        assert result.stdout == ""
+        assert result.stderr == ""
+        assert result.display == []
         assert result.error is None
 
 

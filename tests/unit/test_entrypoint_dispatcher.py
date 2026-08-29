@@ -51,6 +51,34 @@ class FakeTimeoutStrategy:
 class TestRPCDispatcherRouting:
     """The dispatcher routes method names to handler implementations."""
 
+    def test_unexpected_exception_returns_internal_error(
+        self,
+    ) -> None:
+        """Any unexpected exception during dispatch returns -32603 internal error.
+
+        The ValueError branch (unknown method) is tested separately in
+        ``test_unknown_method_returns_error``. This test covers the
+        generic ``except Exception`` fallback in ``handle()``.
+        """
+        timeout = FakeTimeoutStrategy(result=ExecResult(error="noop"))
+        # Make the timeout strategy raise a generic exception when called
+        timeout.execute_with_timeout = lambda ns, code, t: (_ for _ in ()).throw(  # type: ignore[method-assign]
+            RuntimeError("Something went terribly wrong")
+        )
+        dispatcher = RPCDispatcher(
+            namespace=Namespace(),
+            timeout_strategy=timeout,
+            installer=FakePackageInstaller(),
+            config=RPCDispatcherConfig(),
+        )
+
+        request = RPCRequest(id=1, method="exec", params={"code": "1/0"})
+        response = dispatcher.handle(request)
+
+        assert response["id"] == 1
+        assert response["error"]["code"] == -32603
+        assert "Internal error: Something went terribly wrong" in response["error"]["message"]
+
     def test_exec_method_routes_to_namespace(self) -> None:
         timeout = FakeTimeoutStrategy()
         dispatcher = RPCDispatcher(

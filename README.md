@@ -173,7 +173,7 @@ uv run mcp-sandbox-pyrepl --config /path/to/config.yaml
 make check
 
 # Or individually
-make test        # Run all tests with coverage (unit + integration)
+make test        # Run all tests in parallel with coverage (unit + integration)
 make test-unit   # Run unit tests only (fast, no Docker needed)
 make test-integration        # Run integration tests serially
 make test-integration-parallel  # Run integration tests in parallel

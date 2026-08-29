@@ -5,6 +5,7 @@ using the factory pattern. No business logic lives here — just composition.
 """
 
 from __future__ import annotations
+from session_manager import DockerClient
 
 import logging
 import signal
@@ -114,7 +115,7 @@ def _merge_config(
 # ──────────────────────────────────────────────────────────────────────
 
 
-def create_docker_client() -> Any:
+def create_docker_client() -> DockerClient:
     """Create a Docker client using the docker-py library.
 
     Returns a ``RealDockerClient`` adapter that satisfies the
@@ -247,7 +248,7 @@ def setup_signal_handlers(
 # ──────────────────────────────────────────────────────────────────────
 
 
-def main() -> None:
+def main() -> None:  # pragma: no cover
     """Main entry point for the MCP Sandbox PyREPL server."""
     import argparse
 
@@ -293,5 +294,5 @@ def main() -> None:
     mcp_app.run()
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     main()

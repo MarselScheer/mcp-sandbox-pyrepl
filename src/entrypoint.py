@@ -19,6 +19,7 @@ import subprocess
 import sys
 import threading
 import traceback
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from io import StringIO
 from typing import Any, Protocol, TextIO
@@ -246,10 +247,10 @@ class ThreadTimeoutStrategy:
         ret = ctypes.pythonapi.PyThreadState_SetAsyncExc(
             ctypes.c_long(tid), ctypes.py_object(exc_type)
         )
-        if ret == 0:
+        if ret == 0:  # pragma: no cover
             # Thread not found — nothing to interrupt
             return
-        if ret > 1:
+        if ret > 1:  # pragma: no cover
             # Exception was sent to multiple threads (shouldn't happen).
             # Reset by sending None to undo.
             ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_long(tid), None)
@@ -276,8 +277,24 @@ class NoOpTimeoutStrategy:
 class PackageInstaller:
     """Installs Python packages into the session's virtual environment."""
 
-    def __init__(self, venv_path: str = "/session/venv") -> None:
+    def __init__(
+        self,
+        venv_path: str = "/session/venv",
+        run_process: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+        timeout_error: type[subprocess.TimeoutExpired] = subprocess.TimeoutExpired,
+    ) -> None:
+        """Create a package installer.
+
+        Args:
+            venv_path: Path to the virtual environment to install into.
+            run_process: Callable used to run the pip command. Defaults to
+                         ``subprocess.run``; inject a fake in tests.
+            timeout_error: Exception type raised by ``run_process`` on timeout.
+                           Defaults to ``subprocess.TimeoutExpired``.
+        """
         self._venv_path = venv_path
+        self._run_process = run_process
+        self._timeout_error = timeout_error
 
     def install(self, packages: list[dict[str, str]]) -> ExecResult:
         """Install packages via uv pip install.
@@ -291,6 +308,8 @@ class PackageInstaller:
         for pkg in packages:
             name = pkg.get("name", "")
             version = pkg.get("version")
+            if not name:
+                continue
             if version:
                 specs.append(f"{name}=={version}")
             else:
@@ -312,7 +331,7 @@ class PackageInstaller:
         env["PATH"] = f"{self._venv_path}/bin:{env.get('PATH', '')}"
 
         try:
-            result = subprocess.run(
+            result = self._run_process(
                 pip_cmd,
                 capture_output=True,
                 text=True,
@@ -324,7 +343,7 @@ class PackageInstaller:
                 stderr=result.stderr,
                 error=result.stderr if result.returncode != 0 else None,
             )
-        except subprocess.TimeoutExpired:
+        except self._timeout_error:
             return ExecResult(error="Package installation timed out.")
         except FileNotFoundError:
             return ExecResult(error="uv not found. Is it installed in the image?")
@@ -445,11 +464,8 @@ class RPCDispatcher:
         req_id: int | str | None,
         code: int,
         message: str,
-        data: Any = None,
     ) -> dict[str, Any]:
         error: dict[str, Any] = {"code": code, "message": message}
-        if data is not None:
-            error["data"] = data
         return {"jsonrpc": "2.0", "id": req_id, "error": error}
 
     @staticmethod
@@ -521,7 +537,7 @@ class SessionServer:
 # ──────────────────────────────────────────────────────────────────────
 
 
-def main() -> None:
+def main() -> None:  # pragma: no cover
     """Entry point for the entrypoint script."""
     config = RPCDispatcherConfig()
     namespace = Namespace()
@@ -543,5 +559,5 @@ def main() -> None:
     server.run()
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     main()

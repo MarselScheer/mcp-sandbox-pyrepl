@@ -267,3 +267,15 @@ class RealDockerClient:
             f"No JSON-RPC response found in container logs after {elapsed:.3f}s: {logs}"
         )
         raise ConnectionError(msg)
+
+
+# ── Static conformance verification ─────────────────────────────────────
+# Type checker verifies that RealDockerClient structurally satisfies the
+# DockerClient Protocol.  If a method is missing or has a wrong signature,
+# mypy / pyright will flag it here.  Never executed at runtime.
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from session_manager import DockerClient
+
+    _: DockerClient = cast(RealDockerClient, None)

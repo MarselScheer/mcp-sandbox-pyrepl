@@ -331,3 +331,70 @@ class TestSessionManagerRestart:
         assert new_info["container_id"] != original_cid
         assert new_info["status"] == "restarted"
         assert sid in session_manager.list_sessions()
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Tests: RealDockerClient host_path bind-mount branch
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestContainersCreateHostPath:
+    """Tests the ``host_path`` branch of ``RealDockerClient.containers_create()``.
+
+    When ``host_path`` is a real path (truthy string), the adapter creates a
+    Docker bind mount instead of an auto-generated named volume. This test
+    verifies that the bind-mount works end-to-end — the host directory
+    contents are accessible inside a real container.
+
+    This is the *only* test that validates the ``if host_path:`` branch at
+    the real Docker level (all production callers pass empty ``host_path``).
+    """
+
+    def test_bind_mount_is_accessible_inside_container(
+        self, session_manager: SessionManager
+    ) -> None:
+        """Host directory with a marker file is readable via bind mount."""
+        import os
+        import tempfile
+
+        adapter = session_manager._docker
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            # Create a marker file on the host
+            marker_file = os.path.join(tmp_dir, "marker.txt")
+            with open(marker_file, "w") as f:
+                f.write("bind-mount-works")
+
+            # Create a container with a bind mount via a truthy host_path.
+            # This exercises the ``if host_path:`` branch in
+            # RealDockerClient.containers_create().
+            container = adapter.containers_create(
+                image="sandbox-base:3.12",
+                volumes=[
+                    {
+                        "host_path": tmp_dir,
+                        "container_path": "/mnt/bind",
+                        "mode": "ro",
+                    },
+                ],
+            )
+
+            try:
+                # Verify the marker file is readable inside the container
+                result = container.exec_run(
+                    [
+                        "python3",
+                        "-c",
+                        "print(open('/mnt/bind/marker.txt').read().strip())",
+                    ],
+                )
+                output = (
+                    result.output.decode("utf-8").strip()
+                    if isinstance(result.output, bytes)
+                    else result.output.strip()
+                )
+                assert output == "bind-mount-works", (
+                    f"Expected 'bind-mount-works', got '{output}'"
+                )
+            finally:
+                container.remove(force=True)
