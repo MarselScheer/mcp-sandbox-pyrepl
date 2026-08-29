@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] — 2026-08-29
+
+### Added
+
+- **`PackageInstaller.run_process` injection** (`src/entrypoint.py`) — `PackageInstaller.__init__()` now accepts `run_process` (callable, default `subprocess.run`) and `timeout_error` (exception type, default `subprocess.TimeoutExpired`) via constructor, eliminating hidden coupling to `subprocess.run` and enabling trivial unit tests with 1-line fakes
+- **Unit tests for `PackageInstaller`** (`tests/unit/test_entrypoint_installer.py`) — 11-test suite covering spec building (with/without version, multiple packages), environment setup (`VIRTUAL_ENV`, `PATH`, `capture_output`, `timeout`), validation (empty packages, no valid specs), and error paths (timeout, `FileNotFoundError`, non-zero returncode, stdout/stderr propagation) — all with 1-line fake arrange via `FakeRunProcess`
+- **Static type conformance verification** (`src/docker_adapter.py`) — `TYPE_CHECKING`-only `cast()` verifying `RealDockerClient` structurally satisfies the `DockerClient` Protocol; caught at compile time by `pyright`/`mypy`/`ty`
+- **Integration test for `create_docker_client()` factory** (`tests/integration/test_main.py`) — `TestCreateDockerClient` verifying the factory returns a usable `RealDockerClient` that can create, inspect, and exec commands in real containers
+- **Integration test for host_path bind-mount** (`tests/integration/test_session_manager.py`) — `TestContainersCreateHostPath` validating the `if host_path:` branch of `RealDockerClient.containers_create()` with a real Docker bind mount, verifying the host directory contents are accessible inside the container
+- **Unexpected exception handling in `RPCDispatcher`** (`tests/unit/test_entrypoint_dispatcher.py`) — Test covering the generic `except Exception` fallback in `dispatcher.handle()` returning JSON-RPC error code `-32632` with the exception message
+- **Syntax error variant tests** (`tests/unit/test_entrypoint_namespace.py`) — Tests for invalid expression syntax, multi-line `'single' → 'exec'` fallback syntax error, and syntax error resilience verifying namespace state is preserved after a syntax error
+- **SystemExit swallowing tests** (`tests/unit/test_entrypoint_namespace.py`) — Tests verifying `SystemExit` (direct `raise` and via `sys.exit()`) is silently swallowed with no error output, and namespace state persists afterward
+- **Thread timeout edge case tests** (`tests/unit/test_entrypoint_timeout.py`) — Test for unexpected `Namespace.exec()` exception captured by the defensive `except Exception` in `ThreadTimeoutStrategy._run()`, and test verifying the strategy returns a plain timeout error (not `session_corrupted`) when the async exception successfully interrupts a tight Python loop
+- **Config loading error handling tests** (`tests/unit/test_main.py`) — Tests for empty YAML file and null `~` YAML value falling back to defaults, and absolute path preservation in `sanitize_config_path()`
+- **Default shutdown handler test** (`tests/unit/test_main.py`) — Test verifying `_default_shutdown_handler` calls `sys.exit(0)` via `pytest.raises(SystemExit)`
+- **`mise.toml` settings** — Added `minimum_release_age = "30d"` and `python.uv_venv_auto = "source"` settings for correct mise behavior with uv virtual environments
+
+### Changed
+
+- **Makefile `test` target** — Now runs all tests (unit + integration) in parallel via `pytest -n auto`, reducing CI wall-clock time compared to the previous serial execution
+
+### Fixed
+
+- **Package installer name validation** (`src/entrypoint.py`) — Added guard (`if not name: continue`) skipping package dicts with empty `name` fields, preventing malformed specifications from reaching `uv pip install`
+- **Entrypoint `_make_error_response()`** (`src/entrypoint.py`) — Removed unused `data` parameter from the internal JSON-RPC error response builder
+
 ## [0.5.0] — 2026-08-23
 
 ### Added
