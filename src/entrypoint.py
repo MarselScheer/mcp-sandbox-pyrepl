@@ -330,6 +330,11 @@ class PackageInstaller:
         env["VIRTUAL_ENV"] = self._venv_path
         env["PATH"] = f"{self._venv_path}/bin:{env.get('PATH', '')}"
 
+        # Point uv's temp files at /session (large named volume) instead
+        # of the default /tmp which is a 64 MB tmpfs — big wheels (pandas,
+        # polars, scipy) would exhaust it during extraction.
+        env["TMPDIR"] = "/session"
+
         try:
             result = self._run_process(
                 pip_cmd,
