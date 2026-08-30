@@ -102,8 +102,6 @@ class MCPToolHandler:
         if result.get("session_corrupted"):
             response["session_reset"] = True
             self._sm.restart_session(session_id)
-        elif result.get("session_corrupted") is False:
-            pass
 
         return response
 

@@ -315,3 +315,224 @@ class TestListPythonVersions:
 
         assert "3.9" in result["versions"]
         assert "3.12" in result["versions"]
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Tests: Reading files
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestReadFile:
+    """Reading files via the MCP tool."""
+
+    def test_read_existing_file(
+        self, session_manager: SessionManager, dummy_image_registry: dict[str, str]
+    ) -> None:
+        """Write a file, then read it back via the handler."""
+        handler = MCPToolHandler(
+            session_manager=session_manager, image_registry=dummy_image_registry
+        )
+        create_result = handler.create_session()
+        session_id = create_result["session_id"]
+
+        write_result = handler.write_file(
+            session_id=session_id, path="readme.txt", content="read me"
+        )
+        assert write_result.get("success") is True
+
+        result = handler.read_file(session_id=session_id, path="readme.txt")
+
+        assert "content" in result
+        assert result["content"] == "read me"
+
+    def test_read_non_existent_file(
+        self, session_manager: SessionManager, dummy_image_registry: dict[str, str]
+    ) -> None:
+        """Reading a non-existent file returns an error."""
+        handler = MCPToolHandler(
+            session_manager=session_manager, image_registry=dummy_image_registry
+        )
+        create_result = handler.create_session()
+        session_id = create_result["session_id"]
+
+        result = handler.read_file(
+            session_id=session_id, path="no_such_file.txt"
+        )
+
+        assert "error" in result, f"Expected error but got: {result}"
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Tests: Writing files
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestWriteFile:
+    """Writing files via the MCP tool."""
+
+    def test_write_and_verify_content(
+        self, session_manager: SessionManager, dummy_image_registry: dict[str, str]
+    ) -> None:
+        """Write text to a file and read it back to verify content."""
+        handler = MCPToolHandler(
+            session_manager=session_manager, image_registry=dummy_image_registry
+        )
+        create_result = handler.create_session()
+        session_id = create_result["session_id"]
+
+        content = "Hello, world!"
+        write_result = handler.write_file(
+            session_id=session_id, path="greeting.txt", content=content
+        )
+
+        assert write_result.get("success") is True, f"write failed: {write_result}"
+
+        read_result = handler.read_file(session_id=session_id, path="greeting.txt")
+        assert read_result.get("content") == content
+
+    def test_write_to_subdirectory(
+        self, session_manager: SessionManager, dummy_image_registry: dict[str, str]
+    ) -> None:
+        """Writing a file inside a subdirectory creates parent dirs and succeeds."""
+        handler = MCPToolHandler(
+            session_manager=session_manager, image_registry=dummy_image_registry
+        )
+        create_result = handler.create_session()
+        session_id = create_result["session_id"]
+
+        write_result = handler.write_file(
+            session_id=session_id,
+            path="nested/deep/file.txt",
+            content="nested content",
+        )
+
+        assert write_result.get("success") is True, f"write failed: {write_result}"
+
+        read_result = handler.read_file(
+            session_id=session_id, path="nested/deep/file.txt"
+        )
+        assert read_result.get("content") == "nested content"
+
+    def test_write_overwrites_existing_file(
+        self, session_manager: SessionManager, dummy_image_registry: dict[str, str]
+    ) -> None:
+        """Writing to an existing path overwrites the previous content."""
+        handler = MCPToolHandler(
+            session_manager=session_manager, image_registry=dummy_image_registry
+        )
+        create_result = handler.create_session()
+        session_id = create_result["session_id"]
+
+        handler.write_file(
+            session_id=session_id, path="overwrite.txt", content="first version"
+        )
+
+        write_result = handler.write_file(
+            session_id=session_id, path="overwrite.txt", content="second version"
+        )
+        assert write_result.get("success") is True
+
+        read_result = handler.read_file(session_id=session_id, path="overwrite.txt")
+        assert read_result.get("content") == "second version"
+
+    def test_write_file_success_return(
+        self, session_manager: SessionManager, dummy_image_registry: dict[str, str]
+    ) -> None:
+        """write_file returns a dict with success: True on completion."""
+        handler = MCPToolHandler(
+            session_manager=session_manager, image_registry=dummy_image_registry
+        )
+        create_result = handler.create_session()
+        session_id = create_result["session_id"]
+
+        result = handler.write_file(
+            session_id=session_id, path="simple.txt", content="simple"
+        )
+
+        assert isinstance(result, dict)
+        assert result.get("success") is True
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Tests: Listing files
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestListFiles:
+    """Listing files via the MCP tool."""
+
+    def test_list_files_after_write(
+        self, session_manager: SessionManager, dummy_image_registry: dict[str, str]
+    ) -> None:
+        """Written files appear in the listing."""
+        handler = MCPToolHandler(
+            session_manager=session_manager, image_registry=dummy_image_registry
+        )
+        create_result = handler.create_session()
+        session_id = create_result["session_id"]
+
+        handler.write_file(session_id=session_id, path="alpha.txt", content="a")
+        handler.write_file(session_id=session_id, path="beta.txt", content="b")
+
+        result = handler.list_files(session_id=session_id)
+
+        assert "files" in result
+        filenames = [f["name"] for f in result["files"]]
+        assert "alpha.txt" in filenames
+        assert "beta.txt" in filenames
+
+    def test_list_files_in_subdirectory(
+        self, session_manager: SessionManager, dummy_image_registry: dict[str, str]
+    ) -> None:
+        """Files in subdirectories are listed with the subdirectory path."""
+        handler = MCPToolHandler(
+            session_manager=session_manager, image_registry=dummy_image_registry
+        )
+        create_result = handler.create_session()
+        session_id = create_result["session_id"]
+
+        handler.write_file(
+            session_id=session_id, path="subdir/item.txt", content="item"
+        )
+
+        # List root — should include the "subdir" directory
+        root_result = handler.list_files(session_id=session_id)
+        root_names = [f["name"] for f in root_result["files"]]
+        assert "subdir" in root_names
+
+        # List inside "subdir" — should include "item.txt"
+        sub_result = handler.list_files(session_id=session_id, path="subdir")
+        sub_names = [f["name"] for f in sub_result["files"]]
+        assert "item.txt" in sub_names
+
+    def test_list_files_empty_root(
+        self, session_manager: SessionManager, dummy_image_registry: dict[str, str]
+    ) -> None:
+        """Listing the root before any writes returns an empty file list."""
+        handler = MCPToolHandler(
+            session_manager=session_manager, image_registry=dummy_image_registry
+        )
+        create_result = handler.create_session()
+        session_id = create_result["session_id"]
+
+        result = handler.list_files(session_id=session_id)
+
+        assert "files" in result
+        assert isinstance(result["files"], list)
+
+    def test_list_files_entry_has_type(
+        self, session_manager: SessionManager, dummy_image_registry: dict[str, str]
+    ) -> None:
+        """Each listed entry includes a ``type`` key ('file' or 'directory')."""
+        handler = MCPToolHandler(
+            session_manager=session_manager, image_registry=dummy_image_registry
+        )
+        create_result = handler.create_session()
+        session_id = create_result["session_id"]
+
+        handler.write_file(session_id=session_id, path="my_file.txt", content="x")
+
+        result = handler.list_files(session_id=session_id)
+        for entry in result["files"]:
+            assert "type" in entry, f"Missing type in entry: {entry}"
+            assert entry["type"] in ("file", "directory")
