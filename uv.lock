@@ -911,7 +911,7 @@ wheels = [
 
 [[package]]
 name = "mcp-sandbox-pyrepl"
-version = "0.7.0"
+version = "0.7.1"
 source = { editable = "." }
 dependencies = [
     { name = "docker" },

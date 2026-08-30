@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] — 2026-09-02
+
+### Added
+
+- **Integration tests for file operations through `MCPToolHandler`** (`tests/integration/test_mcp_server.py`) — `TestReadFile` (2 tests: existing file, non-existent file), `TestWriteFile` (4 tests: write and verify content, subdirectory creation, overwrite, success return), and `TestListFiles` (4 tests: after write, subdirectory listing, empty root, entry type field) — exercising the full `write_file`/`read_file`/`list_files` MCP tools end-to-end
+- **Unit tests for file operation error handling in `SessionManager`** (`tests/unit/test_session_manager.py`) — `TestWriteFileExecError`, `TestReadFileExecError`, `TestReadFileBinary`, `TestReadFileParseError`, `TestListFilesExecError`, and `TestListFilesParseError` covering:
+  - Exec error branches for `write_file`, `read_file`, and `list_files` when the container's `docker exec` fails (`exit_code != 0`)
+  - `UnicodeDecodeError` fallback returning base64-encoded content for binary/non-UTF-8 file reads
+  - JSON `DecodeError` and `KeyError` parsing failures returning structured error messages
+- **`_FakeContainer` and `_FakeDockerClient` test doubles** (`tests/unit/test_session_manager.py`) — Configurable fake Docker client supporting enough of the `DockerClient` protocol to create sessions and exercise file operation error branches, with a `_make_manager_with_session()` helper
+
+### Changed
+
+- **`RealDockerClient._rpc_counter` moved to class-level** (`src/docker_adapter.py`) — The RPC request ID counter is now a class variable (`RealDockerClient._rpc_counter`) instead of an instance variable, making IDs unique across all client instances in the same process
+
+### Fixed
+
+- **Removed dead code branch in `MCPToolHandler`** (`src/mcp_server.py`) — Eliminated the empty `elif result.get("session_corrupted") is False: pass` branch that had no effect
+
 ## [0.7.0] — 2026-09-01
 
 ### Added
