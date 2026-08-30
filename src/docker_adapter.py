@@ -97,6 +97,8 @@ class RealDockerClient:
     The docker-py library is encapsulated here — no other module imports it.
     """
 
+    _rpc_counter = 0
+
     def __init__(
         self,
         docker_client: _DockerClient,
@@ -104,7 +106,6 @@ class RealDockerClient:
     ) -> None:
         self._client = docker_client
         self._frame_reader = frame_reader()
-        self._rpc_counter = 0
 
     def containers_create(
         self,
@@ -295,8 +296,8 @@ class RealDockerClient:
         for writes + ``container.logs()`` polling loop for reads), eliminating
         the subprocess overhead per call and the polling latency.
         """
-        self._rpc_counter += 1
-        request_id = self._rpc_counter
+        RealDockerClient._rpc_counter += 1
+        request_id = RealDockerClient._rpc_counter
         request["id"] = request_id
 
         sock = self._attach_raw_socket(
